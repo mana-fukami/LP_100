@@ -8,4 +8,4 @@ count_lines=len(lines)
 print("行数："+str(count_lines))
 
 #確認
-# wc -l popular-names.txt
+# wc -l "popular-names.txt"
