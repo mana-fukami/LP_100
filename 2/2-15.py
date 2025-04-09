@@ -14,4 +14,3 @@ for i in range (N):
         new_file.write(lines[i*one_file_lines+j])
 
 #確認コマンド# split -n l/10 popular-names.txt
-#このコマンドだとファイルが均等に10分割されない
