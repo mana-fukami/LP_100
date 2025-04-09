@@ -8,3 +8,5 @@ lines=original_file.readlines()
 N=10
 for i in range(N):
     print(lines[-N+i][0:-1])#N=10のとき、-10,-9,-8,…と表示させたい。
+
+#確認コマンド# tail -10 'popular-names.txt'

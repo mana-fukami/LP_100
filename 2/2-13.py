@@ -7,3 +7,5 @@ lines=original_file.readlines()
 for i in range(10):
     lines[i]=lines[i].replace("\t"," ")#pythonでのtab=\t
     print(lines[i][0:-1])
+
+# 確認コマンド# cat 'popular-names.txt' | sed 's/\t/ /g'
