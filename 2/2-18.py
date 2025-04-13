@@ -21,4 +21,4 @@ row1_sort_by_count=sorted(row1_kinds.items(),key=lambda x:x[1],reverse=True)
 for k in row1_sort_by_count:
     print(k[0])
 
-#確認コマンド#cat 'popular-names.txt' | sed 's/\t/ /g' |cut -f 1 -d " "|uniq -c|sort -r -n
+#確認コマンド#cat 'popular-names.txt' | sed 's/\t/ /g' |cut -f 1 -d " "|sort|uniq -c|sort -n -r
