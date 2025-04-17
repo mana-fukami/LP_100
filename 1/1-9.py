@@ -9,7 +9,7 @@
 
 import random
 
-def shuffle(word):
+def shuffle_words(word):
     if len(word)<=4:
         return word
     else:
@@ -24,6 +24,6 @@ original_text="I couldn’t believe that I could actually understand what I was 
 words_list=original_text.split(" ")
 shuffled_text=""
 for i in words_list:
-    shuffled_text+=shuffle(i)+" "
+    shuffled_text+=shuffle_words(i)+" "
 
 print(shuffled_text)
