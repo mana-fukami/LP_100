@@ -11,11 +11,19 @@ text = """
 """
 
 import spacy
+import ginza
 
 nlp=spacy.load("ja_ginza")
-doc=nlp(txt)
+doc=nlp(text)
 
-for sent in doc.sents:
-    for token in sent:
-        print(token.i,token.orth_,token.lemma_)
+print('---- bunsetu_spans ----')
+for span in ginza.bunsetu_spans(doc):
+    for token in span.lefts:
+        print(f'{token} : {str(ginza.bunsetu_span(token))} → {str(span)}')
+
+
+print('---- bunsetu_phrase_spans (主辞) ----')
+for span in ginza.bunsetu_phrase_spans(doc):
+    for token in span.lefts:
+        print(f'{token} : {str(ginza.bunsetu_span(token))} → {str(span)}')
 
