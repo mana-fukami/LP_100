@@ -1,0 +1,4 @@
+nlp_env/Lib/site-packages/unidic/dicdir/model.bin filter=lfs diff=lfs merge=lfs -text
+nlp_env/Lib/site-packages/sudachidict_core/resources/system.dic filter=lfs diff=lfs merge=lfs -text
+nlp_env/Lib/site-packages/unidic/dicdir/matrix.bin filter=lfs diff=lfs merge=lfs -text
+nlp_env/Lib/site-packages/unidic/dicdir/sys.dic filter=lfs diff=lfs merge=lfs -text

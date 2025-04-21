@@ -9,3 +9,13 @@ text = """
 笛を吹き、羊と遊んで暮して来た。
 けれども邪悪に対しては、人一倍に敏感であった。
 """
+
+import spacy
+
+nlp=spacy.load("ja_ginza")
+doc=nlp(txt)
+
+for sent in doc.sents:
+    for token in sent:
+        print(token.i,token.orth_,token.lemma_)
+
