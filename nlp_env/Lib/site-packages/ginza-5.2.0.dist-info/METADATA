@@ -1,0 +1,15 @@
+Metadata-Version: 2.1
+Name: ginza
+Version: 5.2.0
+Summary: GiNZA, An Open Source Japanese NLP Library, based on Universal Dependencies
+Home-page: https://github.com/megagonlabs/ginza
+Author: Megagon Labs, Tokyo.
+Author-email: ginza@megagon.ai
+License: MIT
+Requires-Python: >=3.8
+License-File: LICENSE
+Requires-Dist: spacy <4.0.0,>=3.4.4
+Requires-Dist: plac >=1.3.3
+Requires-Dist: SudachiPy <0.7.0,>=0.6.2
+Requires-Dist: SudachiDict-core >=20210802
+
