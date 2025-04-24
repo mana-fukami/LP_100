@@ -16,14 +16,31 @@ import ginza
 nlp=spacy.load("ja_ginza")
 doc=nlp(text)
 
-print('---- bunsetu_spans ----')
-for span in ginza.bunsetu_spans(doc):
+for span in ginza.bunsetu_spans(doc): #係り付け結果が文節で返される
     for token in span.lefts:
-        print(f'{token} : {str(ginza.bunsetu_span(token))} → {str(span)}')
+        print(str(ginza.bunsetu_span(token))+"  "+str(span))
 
+#実行結果
+"""
+メロスは  激怒した。
+かの  邪智暴虐の
+邪智暴虐の  王を
+必ず、  除かなければならぬと
+王を  除かなければならぬと
+除かなければならぬと  決意した。
 
-print('---- bunsetu_phrase_spans (主辞) ----')
-for span in ginza.bunsetu_phrase_spans(doc):
-    for token in span.lefts:
-        print(f'{token} : {str(ginza.bunsetu_span(token))} → {str(span)}')
+メロスには  わからぬ。
+政治が  わからぬ。
 
+メロスは、  牧人である。
+村の  牧人である。
+
+笛を  吹き、
+羊と  遊んで
+吹き、  暮して来た。
+遊んで  暮して来た。
+
+けれども  邪悪に対しては、
+邪悪に対しては、  敏感であった。
+人一倍に  敏感であった。
+"""

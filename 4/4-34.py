@@ -9,3 +9,22 @@ text = """
 けれども邪悪に対しては、人一倍に敏感であった。
 """
 
+import spacy
+import ginza
+
+nlp=spacy.load("ja_ginza")
+doc=nlp(text)
+
+for span in ginza.bunsetu_spans(doc): #係り付け結果が文節で返される
+    for token in span.lefts:
+        if "メロス" in str(ginza.bunsetu_span(token)):
+            print(str(ginza.bunsetu_span(token))+"  "+str(span))
+
+#実行結果
+"""
+メロスは  激怒した。
+
+メロスには  わからぬ。
+
+メロスは、  牧人である。
+"""
