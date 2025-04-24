@@ -8,3 +8,16 @@ text = """
 笛を吹き、羊と遊んで暮して来た。
 けれども邪悪に対しては、人一倍に敏感であった。
 """
+
+import spacy
+from spacy import displacy
+import ginza
+
+nlp=spacy.load("ja_ginza")
+doc=nlp(text)
+
+html=displacy.render(doc,style="dep")
+with open("dependency_tree.html", "w", encoding="utf-8") as f:
+    f.write(html)
+
+#実行結果：dependency_tree.htmlをlive serverで開くと確認できる。
