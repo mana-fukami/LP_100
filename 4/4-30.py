@@ -14,7 +14,8 @@ import MeCab
 import unidic
 #rを文字列前につけると、\を特殊文字として扱わない
 #rをつけないと、\は特殊文字として扱われるため、処理が止まる
-tagger=MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir") #辞書の指定
+
+tagger=MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir")
 node=tagger.parseToNode(text) #各形態素をノードとして取得する#ノード＝構造体リスト
 #ノードの構成：
 #   node.surface - 表層形
