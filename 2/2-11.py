@@ -11,7 +11,7 @@ lines=original_file.readlines()
 
 N=10
 for i in range(N):
-    print(lines[i][0:-1]) #lines[i]にも改行は含まれる&print()でも末尾に改行がある→lines[i][1:-1]で改行を削除して表示。
+    print(lines[i],end="") #lines[i]にも改行は含まれる&print()でも末尾に改行がある→lines[i][1:-1]で改行を削除して表示。
 
 # 実行結果
 """
