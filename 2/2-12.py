@@ -11,7 +11,7 @@ lines=original_file.readlines()
 
 N=10
 for i in range(N):
-    print(lines[-N+i][0:-1]) #N=10のとき、-10,-9,-8,…,-1と表示させたい。
+    print(lines[-N+i],end="") #N=10のとき、-10,-9,-8,…,-1と表示させたい。
 
 # 実行結果
 """

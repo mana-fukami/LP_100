@@ -10,7 +10,7 @@ original_file=open("2\popular-names.txt","r")
 lines=original_file.readlines()
 for i in range(10):
     lines[i]=lines[i].replace("\t"," ") #pythonでtab="\t"
-    print(lines[i][0:-1])
+    print(lines[i],end="")
 
 # 実行結果
 """
