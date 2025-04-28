@@ -1,10 +1,13 @@
+#制御フローを読みやすくする
+#巨大な式を分割する
+
 #テンプレートの内容を利用し、国旗画像のURLを取得せよ。
 # （ヒント: MediaWiki APIのimageinfoを呼び出して、ファイル参照をURLに変換すればよい）
 
 import json
 import re
 
-json_file=open("jawiki-country.json","r",encoding="utf-8")
+json_file=open("3\jawiki-country.json","r",encoding="utf-8")
 json_lines=json_file.readlines()
 articles=[]
 for line in json_lines:
@@ -19,16 +22,20 @@ fundamental_info=re.findall("\|(.*?) = (.*?)\n",UK_text)
 
 info_template={}
 for info in fundamental_info:
+    #強調マークアップの除去
     new_str=re.sub("'*?","",info[1])
+    #{}関連のマークアップの除去
     new_str=re.sub("\{\{.*?\|.*?\|","",new_str)
     new_str=re.sub("\{\{.*?\|","",new_str)
     new_str=re.sub("\{\{","",new_str)
     new_str=re.sub("\}\}","",new_str)
+    #[]関連のマークアップの除去
     new_str=re.sub("\[\[ファイル:.*?\|.*?\|","",new_str)
     new_str=re.sub("\[\[([^\[])*?\|([^\[])*?\|","",new_str)
     new_str=re.sub("\[\[([^\[])*?\|","",new_str)
     new_str=re.sub("\[\[","",new_str)
     new_str=re.sub("\]\]","",new_str)
+    #<>~</>関連のマークアップの除去
     new_str=re.sub("\<ref.*?\>.*?</ref>","",new_str)
     new_str=re.sub("\<.*?/\>","",new_str)
     info_template[info[0]]=new_str
@@ -56,3 +63,8 @@ PAGES=DATA["query"]["pages"]
 #print(fundamental_info)
 for k, v in PAGES.items():
     print(v["imageinfo"][0]["url"])
+
+#実行結果
+"""
+https://upload.wikimedia.org/wikipedia/en/a/ae/Flag_of_the_United_Kingdom.svg
+"""
