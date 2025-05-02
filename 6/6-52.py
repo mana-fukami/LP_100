@@ -8,7 +8,7 @@ word2vec=Word2Vec()
 sim_list=[]
 
 for word in word2vec.model.key_to_index:
-    sim=word2vec.cos_sim("United States",word)
+    sim=word2vec.word_cos_sim("United States",word)
     sim_list.append((word,sim))
 
 sim_list.sort(key=lambda x:x[1],reverse=True)
