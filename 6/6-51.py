@@ -1,10 +1,10 @@
 # 単語の類似度
 # “United States”と”U.S.”のコサイン類似度を計算せよ。
 
-from WordVector import word2vec
+from WordVector import Word2Vec
 import numpy as np
 
-word_vec=word2vec()
+word_vec=Word2Vec()
 
 vec1=word_vec.get_vector("United States")
 vec2=word_vec.get_vector("U.S.")
