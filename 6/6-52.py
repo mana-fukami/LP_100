@@ -12,6 +12,7 @@ for word in word2vec.model.key_to_index:
     sim_list.append((word,sim))
 
 sim_list.sort(key=lambda x:x[1],reverse=True)
+# sim_list=model.most_similar(United_States)
 for i in range(10):
     sim=sim_list[i]
     print(f"{sim[0],sim[1]}")
