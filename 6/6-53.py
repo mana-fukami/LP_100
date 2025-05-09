@@ -17,7 +17,7 @@ sub_vec=vec1-vec2
 add_vec=sub_vec+vec3
 
 sim_list=word2vec.vec_cos_sim_search(add_vec)
-
+# sim_list=model.most_similar(positive=[word1,word3],negative[word2])
 for i in range(10):
     sim=sim_list[i]
     print(f"{sim[0]}: {sim[1]}")
