@@ -13,6 +13,7 @@ dot_product=np.dot(vec1,vec2)
 norm_vec1=np.linalg.norm(vec1)
 norm_vec2=np.linalg.norm(vec2)
 cosine_sim=dot_product/(norm_vec1*norm_vec2)
+#cosine_sim=model.similarity("United_States","U.S.")
 
 print(f"cosine similarity: {cosine_sim}")
 
