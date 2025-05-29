@@ -20,7 +20,7 @@ model=log_learn.learned_model()
 dev_dict_list=DataSummary(dev_df).organize_data()
 # データフレーム型に変換
 train_data=pd.DataFrame(dev_dict_list)
-# 予測用の入力値と目標値
+# 予測用の入力値
 x_pred=log_learn.vec.transform(train_data["feature"])
 x_sample=x_pred[0]
 # 条件付き確率を求める
