@@ -25,12 +25,21 @@ x_pred=log_learn.vec.transform(train_data["feature"])
 t_pred=train_data["label"]
 
 print("予測値")
-print(model.predict(x_pred[:1]))
-print(t_pred[0])
+print(model.predict(x_pred[:5]))
+print(t_pred[:5])
 
 # 実行結果
-"""
+"""[:1]のとき
 予測値
 [1]
 1
+"""
+"""[:5]のとき
+予測値
+[1 0 1 1 0]
+0    1
+1    0
+2    1
+3    1
+4    0
 """
