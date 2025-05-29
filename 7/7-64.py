@@ -15,7 +15,7 @@ dev_df=pd.read_csv(dev,sep="\t")
 log_learn=LogisticLearning(train_df)
 model=log_learn.learned_model()
 
-# 予測
+# 条件付き確率
 # テキスト、特徴ベクトル、ラベルを格納した辞書オブジェクトの作成
 dev_dict_list=DataSummary(dev_df).organize_data()
 # データフレーム型に変換
