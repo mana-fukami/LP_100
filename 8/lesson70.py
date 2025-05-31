@@ -20,10 +20,13 @@ for id,word in enumerate(model.index_to_key):
 
 embedding_matrix = np.array(embedding_matrix)
 
-print(embedding_matrix.shape)
-print(id_to_token[100])
-print(token_to_id[id_to_token[100]])
-print(embedding_matrix[0])
+def show_result():
+    print(embedding_matrix.shape)
+    print(id_to_token[100])
+    print(token_to_id[id_to_token[100]])
+    print(embedding_matrix[0])
+
+#show_result()
 
 # 実行結果
 """
