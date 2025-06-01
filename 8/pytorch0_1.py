@@ -35,8 +35,11 @@ print(f"Shape of tensor: {tensor.shape}")
 print(f"Datatype of tensor: {tensor.dtype}")
 print(f"Device tensor is stored on: {tensor.device}")
 
+print("--------------------------------------")
+
 if torch.cuda.is_available():
     tensor=tensor.to("cuda")
+print(f"Device tensor is stored on: {tensor.device}")
 
 tensor=torch.ones(4,4)
 print('First row: ',tensor[0])
@@ -86,3 +89,58 @@ t = torch.from_numpy(n)
 np.add(n, 1, out=n)
 print(f"t: {t}")
 print(f"n: {n}")
+
+# 実行結果
+"""
+Ones Tensor: 
+ tensor([[1, 1],
+        [1, 1]]) 
+
+Random Tensor: 
+ tensor([[0.3425, 0.1734],
+        [0.3176, 0.4868]]) 
+
+Random Tensor: 
+ tensor([[0.3888, 0.2919, 0.6471],
+        [0.3292, 0.4330, 0.4227]]) 
+
+Ones Tensor: 
+ tensor([[1., 1., 1.],
+        [1., 1., 1.]]) 
+
+Zeros Tensor: 
+ tensor([[0., 0., 0.],
+        [0., 0., 0.]])
+Shape of tensor: torch.Size([3, 4])
+Datatype of tensor: torch.float32
+Device tensor is stored on: cpu
+--------------------------------------
+Device tensor is stored on: cuda:0
+First row:  tensor([1., 1., 1., 1.])
+First column:  tensor([1., 1., 1., 1.])
+Last column: tensor([1., 1., 1., 1.])
+tensor([[1., 0., 1., 1.],
+        [1., 0., 1., 1.],
+        [1., 0., 1., 1.],
+        [1., 0., 1., 1.]])
+tensor([[1., 0., 1., 1., 1., 0., 1., 1., 1., 0., 1., 1.],
+        [1., 0., 1., 1., 1., 0., 1., 1., 1., 0., 1., 1.],
+        [1., 0., 1., 1., 1., 0., 1., 1., 1., 0., 1., 1.],
+        [1., 0., 1., 1., 1., 0., 1., 1., 1., 0., 1., 1.]])
+12.0 <class 'float'>
+tensor([[1., 0., 1., 1.],
+        [1., 0., 1., 1.],
+        [1., 0., 1., 1.],
+        [1., 0., 1., 1.]]) 
+
+tensor([[6., 5., 6., 6.],
+        [6., 5., 6., 6.],
+        [6., 5., 6., 6.],
+        [6., 5., 6., 6.]])
+t: tensor([1., 1., 1., 1., 1.])
+n: [1. 1. 1. 1. 1.]
+t: tensor([2., 2., 2., 2., 2.])
+n: [2. 2. 2. 2. 2.]
+t: tensor([2., 2., 2., 2., 2.], dtype=torch.float64)
+n: [2. 2. 2. 2. 2.]
+"""
