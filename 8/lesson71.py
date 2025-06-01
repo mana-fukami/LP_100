@@ -41,10 +41,13 @@ def get_token_id(text):
 
 train_token_id=text_to_token_id(train_df)
 dev_token_id=text_to_token_id(dev_df)
-print(train_token_id[0])
-print("--------------------")
-print(dev_token_id[0])
 
+def show_result():
+    print(train_token_id[0])
+    print("--------------------")
+    print(dev_token_id[0])
+
+# show_result()
 # 実行結果
 """
 {'text': 'this new jangle of noise , mayhem and stupidity must be a serious contender for the title . ', 'label': tensor([0.]), 'input_ids': tensor([    29,     66, 169108,   4702,  18028,  25799,    337,     17,    982,
