@@ -122,5 +122,5 @@ print(f"Label: {label}")
 
 # 実行結果
 """
-
+read_imageのエラーにより、実行できず
 """
