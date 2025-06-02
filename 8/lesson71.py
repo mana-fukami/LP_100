@@ -7,7 +7,8 @@ Stanford Sentiment Treebank (SST) をダウンロードし、
 訓練セットおよび開発セットから削除せよ(このため、第7章の実験で得られた正解率と比較できなくなることに注意せよ)。
 """
 import pandas as pd
-import torch
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
 from lesson70 import embedding_matrix,token_to_id,id_to_token
 
 train_tsv=open("SST-2/train.tsv","r")
@@ -16,36 +17,48 @@ train_df=pd.read_csv(train_tsv,sep="\t")
 dev_tsv=open("SST-2/dev.tsv","r")
 dev_df=pd.read_csv(dev_tsv,sep="\t")
 
-def text_to_token_id(df):
-    token_id=[]
-    dict={}
-    for i in range(df.shape[0]):
-        label=df.loc[i,"label"]
-        text=df.loc[i,"sentence"]
-        dict["text"]=text
-        dict["label"]=torch.tensor([float(label)])
-        ids=get_token_id(text)
-        if ids!=[]:
-            dict["input_ids"]=torch.tensor(ids)
-            token_id.append(dict)
-    return token_id
+class Dataset():
+    def __init__(self,data_df):
+        self.token_id=self.text_to_token_id(data_df)
 
-def get_token_id(text):
-    words=text.split(" ")
-    ids=[]
-    for word in words:
-        if word in token_to_id.keys():
-            id=token_to_id[word]
-            ids.append(id)
-    return ids
+    def __len__(self):
+        return len(self.token_id)
 
-train_token_id=text_to_token_id(train_df)
-dev_token_id=text_to_token_id(dev_df)
+    def __getitem__(self,idx):
+        return self.token_id[idx]
+
+    def text_to_token_id(self,df):
+        token_id=[]
+        dict={}
+        for i in range(df.shape[0]):
+            label=df.loc[i,"label"]
+            text=df.loc[i,"sentence"]
+            dict["text"]=text
+            dict["label"]=torch.tensor([float(label)])
+            ids=self.get_token_id(text)
+            if ids!=[]:
+                dict["input_ids"]=torch.tensor(ids)
+                token_id.append(dict)
+        return token_id
+
+    def get_token_id(self,text):
+        words=text.split(" ")
+        ids=[]
+        for word in words:
+            if word in token_to_id.keys():
+                id=token_to_id[word]
+                ids.append(id)
+        return ids
+
+train_dataset=Dataset(train_df)
+train_dataloader=DataLoader(train_dataset,batch_size=64,shuffle=True)
+dev_dataset=Dataset(dev_df)
+dev_dataloader=DataLoader(dev_dataset,batch_size=64,shuffle=True)
 
 def show_result():
-    print(train_token_id[0])
+    print(train_dataset.__getitem__(0))
     print("--------------------")
-    print(dev_token_id[0])
+    print(dev_dataset.__getitem__(0))
 
 # show_result()
 # 実行結果
