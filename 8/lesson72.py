@@ -24,9 +24,10 @@ class NeuralNetwork(nn.Module):
         probs=torch.sigmoid(logits)
         return probs
 
+input_dim=embedding_matrix.shape[1]
+model = NeuralNetwork(input_dim).to(device)
+
 def show_result():
-    input_dim=embedding_matrix.shape[1]
-    model = NeuralNetwork(input_dim).to(device)
     print(model)
 
 #show_result()
