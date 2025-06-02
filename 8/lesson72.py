@@ -100,7 +100,7 @@ def show_result():
     print(dev_dataset.__getitem__(0))
     print(model)
 
-show_result()
+#show_result()
 # 実行結果
 """
 Using cpu device
