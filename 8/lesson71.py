@@ -75,7 +75,7 @@ def show_result():
     dev_feature=next(iter(dev_dataloader))
     print(dev_feature)
 
-show_result()
+#show_result()
 # 実行結果
 """
 {'text': ['very much worth ', 'outdated '], 'label': tensor([[1.],
