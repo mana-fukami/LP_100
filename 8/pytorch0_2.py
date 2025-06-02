@@ -4,7 +4,12 @@ from torchvision import datasets
 from torchvision.transforms import ToTensor, Lambda
 import matplotlib.pyplot as plt
 
-
+"""
+root ：訓練/テストデータが格納されているパスを指定
+train ：訓練データまたはテストデータセットを指定
+download=True:root にデータが存在しない場合は、インターネットからデータもダウンロードを指定
+transform と target_transform:特徴量とラベルの変換を指定
+"""
 training_data = datasets.FashionMNIST(
     root="data",
     train=True,
@@ -19,6 +24,9 @@ test_data = datasets.FashionMNIST(
     transform=ToTensor()
 )
 
+"""
+サンプルデータの可視化
+"""
 labels_map = {
     0: "T-Shirt",
     1: "Trouser",
@@ -42,6 +50,11 @@ for i in range(1, cols * rows + 1):
     plt.imshow(img.squeeze(), cmap="gray")
 plt.show()
 
+"""
+データセットのカスタム
+__init__, __len__, __getitem__
+の3つを実装
+"""
 import os
 import pandas as pd
 from torchvision.io import read_image
@@ -87,6 +100,11 @@ def __getitem__(self, idx):
     sample = {"image": image, "label": label}
     return sample
 
+"""
+DataLoaderの役割
+モデルの訓練時にはミニバッチ()"minibatches")単位でデータを扱い、
+各epochでデータをシャッフルする
+"""
 from torch.utils.data import DataLoader
 
 train_dataloader = DataLoader(training_data, batch_size=64, shuffle=True)
@@ -102,3 +120,7 @@ plt.imshow(img, cmap="gray")
 plt.show()
 print(f"Label: {label}")
 
+# 実行結果
+"""
+read_imageのエラーにより、実行できず
+"""
