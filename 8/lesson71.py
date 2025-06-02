@@ -7,6 +7,7 @@ Stanford Sentiment Treebank (SST) をダウンロードし、
 訓練セットおよび開発セットから削除せよ(このため、第7章の実験で得られた正解率と比較できなくなることに注意せよ)。
 """
 import pandas as pd
+import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from lesson70 import embedding_matrix,token_to_id,id_to_token
@@ -51,16 +52,14 @@ class Dataset():
         return ids
 
 train_dataset=Dataset(train_df)
-train_dataloader=DataLoader(train_dataset,batch_size=64,shuffle=True)
 dev_dataset=Dataset(dev_df)
-dev_dataloader=DataLoader(dev_dataset,batch_size=64,shuffle=True)
 
 def show_result():
     print(train_dataset.__getitem__(0))
     print("--------------------")
     print(dev_dataset.__getitem__(0))
 
-# show_result()
+#show_result()
 # 実行結果
 """
 {'text': 'this new jangle of noise , mayhem and stupidity must be a serious contender for the title . ', 'label': tensor([0.]), 'input_ids': tensor([    29,     66, 169108,   4702,  18028,  25799,    337,     17,    982,
