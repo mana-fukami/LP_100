@@ -52,19 +52,31 @@ class Dataset():
         return ids
 
 train_dataset=Dataset(train_df)
+train_dataloader=DataLoader(train_dataset,batch_size=2,shuffle=True)
 dev_dataset=Dataset(dev_df)
+dev_dataloader=DataLoader(dev_dataset,batch_size=2,shuffle=True)
 
 def show_result():
-    print(train_dataset.__getitem__(0))
+    train_feature=next(iter(train_dataloader))
+    print(train_feature)
+    #print(train_labels)
     print("--------------------")
-    print(dev_dataset.__getitem__(0))
+    dev_feature=next(iter(dev_dataloader))
+    print(dev_feature)
+    #print(dev_labels)
 
-#show_result()
+show_result()
 # 実行結果
 """
-{'text': 'this new jangle of noise , mayhem and stupidity must be a serious contender for the title . ', 'label': tensor([0.]), 'input_ids': tensor([    29,     66, 169108,   4702,  18028,  25799,    337,     17,    982,
-          7607,      3,     12,    759])}
+{'text': ['this new jangle of noise , mayhem and stupidity must be a serious contender for the title . ', 'this new jangle of noise , mayhem and stupidity must be a serious contender for the title . '], 'label': tensor([[0.],
+        [0.]]), 'input_ids': tensor([[    29,     66, 169108,   4702,  18028,  25799,    337,     17,    982,
+           7607,      3,     12,    759],
+        [    29,     66, 169108,   4702,  18028,  25799,    337,     17,    982,
+           7607,      3,     12,    759]])}
 --------------------
-{'text': "looking aristocratic , luminous yet careworn in jane hamilton 's exemplary costumes , rampling gives a performance that could not be improved upon . ' ", 'label': tensor([1.]), 'input_ids': tensor([   380,  54575,  44396,    507, 301929,      2, 269337, 442845,  17067,
-         10358,   1337,    476,      4,     76,     14,     17,   1519,   1473])}
+{'text': ["looking aristocratic , luminous yet careworn in jane hamilton 's exemplary costumes , rampling gives a performance that could not be improved upon . ' ", "looking aristocratic , luminous yet careworn in jane hamilton 's exemplary costumes , rampling gives a performance that could not be improved upon . ' "], 'label': tensor([[1.],
+        [1.]]), 'input_ids': tensor([[   380,  54575,  44396,    507, 301929,      2, 269337, 442845,  17067,
+          10358,   1337,    476,      4,     76,     14,     17,   1519,   1473],
+        [   380,  54575,  44396,    507, 301929,      2, 269337, 442845,  17067,
+          10358,   1337,    476,      4,     76,     14,     17,   1519,   1473]])}
 """
