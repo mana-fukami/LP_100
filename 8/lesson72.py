@@ -61,9 +61,9 @@ class CustomDataset(Dataset):
             data["feature_vec"]=torch.tensor(average_vec,dtype=torch.float32)
         return data_list
 
-train_dataset=Dataset(train_df)
+train_dataset=CustomDataset(train_df)
 train_dataloader=DataLoader(train_dataset,batch_size=64,shuffle=True)
-dev_dataset=Dataset(dev_df)
+dev_dataset=CustomDataset(dev_df)
 dev_dataloader=DataLoader(dev_dataset,batch_size=64,shuffle=True)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -79,12 +79,17 @@ class NeuralNetwork(nn.Module):
         probs=torch.sigmoid(logits)
         return probs
 
+input_dim=embedding_matrix.shape[1]
+model = NeuralNetwork(input_dim).to(device)
+
 def show_result():
-    model = NeuralNetwork().to(device)
     print(model)
 
 show_result()
 # 実行結果
 """
-
+Using cpu device
+NeuralNetwork(
+  (linear): Linear(in_features=300, out_features=1, bias=True)
+)
 """
