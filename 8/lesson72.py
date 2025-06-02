@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import torch
 from torch import nn
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from lesson70 import embedding_matrix,token_to_id,id_to_token
@@ -61,10 +62,22 @@ class CustomDataset(Dataset):
             data["feature_vec"]=torch.tensor(average_vec,dtype=torch.float32)
         return data_list
 
+# カスタムコラート関数
+def custom_collate_fn(batch):
+    texts = [item["text"] for item in batch]
+    labels = torch.stack([item["label"] for item in batch])
+    input_ids = [item["input_ids"] for item in batch]
+    feature_vecs=torch.stack([item["feature_vec"] for item in batch])
+
+    # input_idsをパディングして同じ長さに揃える
+    padded_input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
+
+    return {"text": texts, "label": labels, "input_ids": padded_input_ids}
+
 train_dataset=CustomDataset(train_df)
-train_dataloader=DataLoader(train_dataset,batch_size=64,shuffle=True)
+train_dataloader=DataLoader(train_dataset,batch_size=64,shuffle=True, collate_fn=custom_collate_fn)
 dev_dataset=CustomDataset(dev_df)
-dev_dataloader=DataLoader(dev_dataset,batch_size=64,shuffle=True)
+dev_dataloader=DataLoader(dev_dataset,batch_size=64,shuffle=True, collate_fn=custom_collate_fn)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print('Using {} device'.format(device))
@@ -87,7 +100,7 @@ def show_result():
     print(dev_dataset.__getitem__(0))
     print(model)
 
-#show_result()
+show_result()
 # 実行結果
 """
 Using cpu device
