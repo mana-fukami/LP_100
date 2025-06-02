@@ -72,7 +72,7 @@ def custom_collate_fn(batch):
     # input_idsをパディングして同じ長さに揃える
     padded_input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
 
-    return {"text": texts, "label": labels, "input_ids": padded_input_ids}
+    return {"text": texts, "label": labels, "input_ids": padded_input_ids,"feature_vec":feature_vecs}
 
 train_dataset=CustomDataset(train_df)
 train_dataloader=DataLoader(train_dataset,batch_size=64,shuffle=True, collate_fn=custom_collate_fn)
