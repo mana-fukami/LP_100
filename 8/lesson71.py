@@ -8,6 +8,7 @@ Stanford Sentiment Treebank (SST) をダウンロードし、
 """
 import pandas as pd
 import torch
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from lesson70 import embedding_matrix,token_to_id,id_to_token
@@ -18,7 +19,7 @@ train_df=pd.read_csv(train_tsv,sep="\t")
 dev_tsv=open("SST-2/dev.tsv","r")
 dev_df=pd.read_csv(dev_tsv,sep="\t")
 
-class Dataset():
+class CustomDataset(Dataset):
     def __init__(self,data_df):
         self.token_id=self.text_to_token_id(data_df)
 
@@ -30,16 +31,16 @@ class Dataset():
 
     def text_to_token_id(self,df):
         token_id=[]
-        dict={}
         for i in range(df.shape[0]):
+            data={}
             label=df.loc[i,"label"]
             text=df.loc[i,"sentence"]
-            dict["text"]=text
-            dict["label"]=torch.tensor([float(label)])
+            data["text"]=text
+            data["label"]=torch.tensor([label],dtype=torch.float32)
             ids=self.get_token_id(text)
             if ids!=[]:
-                dict["input_ids"]=torch.tensor(ids)
-                token_id.append(dict)
+                data["input_ids"]=torch.tensor(ids)
+                token_id.append(data)
         return token_id
 
     def get_token_id(self,text):
@@ -51,32 +52,39 @@ class Dataset():
                 ids.append(id)
         return ids
 
-train_dataset=Dataset(train_df)
-train_dataloader=DataLoader(train_dataset,batch_size=2,shuffle=True)
-dev_dataset=Dataset(dev_df)
-dev_dataloader=DataLoader(dev_dataset,batch_size=2,shuffle=True)
+# カスタムコラート関数
+def custom_collate_fn(batch):
+    texts = [item["text"] for item in batch]
+    labels = torch.stack([item["label"] for item in batch])
+    input_ids = [item["input_ids"] for item in batch]
+
+    # input_idsをパディングして同じ長さに揃える
+    padded_input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
+
+    return {"text": texts, "label": labels, "input_ids": padded_input_ids}
+
+train_dataset=CustomDataset(train_df)
+train_dataloader=DataLoader(train_dataset,batch_size=2,shuffle=True,collate_fn=custom_collate_fn)
+dev_dataset=CustomDataset(dev_df)
+dev_dataloader=DataLoader(dev_dataset,batch_size=2,shuffle=True,collate_fn=custom_collate_fn)
 
 def show_result():
     train_feature=next(iter(train_dataloader))
     print(train_feature)
-    #print(train_labels)
     print("--------------------")
     dev_feature=next(iter(dev_dataloader))
     print(dev_feature)
-    #print(dev_labels)
 
 show_result()
 # 実行結果
 """
-{'text': ['this new jangle of noise , mayhem and stupidity must be a serious contender for the title . ', 'this new jangle of noise , mayhem and stupidity must be a serious contender for the title . '], 'label': tensor([[0.],
-        [0.]]), 'input_ids': tensor([[    29,     66, 169108,   4702,  18028,  25799,    337,     17,    982,
-           7607,      3,     12,    759],
-        [    29,     66, 169108,   4702,  18028,  25799,    337,     17,    982,
-           7607,      3,     12,    759]])}
+{'text': ['very much worth ', 'outdated '], 'label': tensor([[1.],
+        [0.]]), 'input_ids': tensor([[  139,   151,  1070],
+        [13000,     0,     0]])}
 --------------------
-{'text': ["looking aristocratic , luminous yet careworn in jane hamilton 's exemplary costumes , rampling gives a performance that could not be improved upon . ' ", "looking aristocratic , luminous yet careworn in jane hamilton 's exemplary costumes , rampling gives a performance that could not be improved upon . ' "], 'label': tensor([[1.],
-        [1.]]), 'input_ids': tensor([[   380,  54575,  44396,    507, 301929,      2, 269337, 442845,  17067,
-          10358,   1337,    476,      4,     76,     14,     17,   1519,   1473],
-        [   380,  54575,  44396,    507, 301929,      2, 269337, 442845,  17067,
-          10358,   1337,    476,      4,     76,     14,     17,   1519,   1473]])}
+{'text': ['complete lack of originality , cleverness or even visible effort ', 'one of those energetic surprises , an original that pleases almost everyone who sees it . '], 'label': tensor([[0.],        
+        [1.]]), 'input_ids': tensor([[  924,  1384, 27549, 81316,    30,   156,  5358,   798,     0,     0,
+             0,     0,     0],
+        [   46,   134, 12156,  9638,    28,  1413,     4, 40862,   608,   891,
+            32,  2660,    16]])}
 """
