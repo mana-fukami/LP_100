@@ -2,7 +2,7 @@ nlp_env/
 allKeys/
 wordsim353/
 SST-2/
-GooGleNews-vectors-negative300.bin
+GoogleNews-vectors-negative300.bin
 8/data/
 8/model_weights.pth
 8/model.onnx
