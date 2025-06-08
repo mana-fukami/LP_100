@@ -6,7 +6,6 @@
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch import tensor
-from lesson70 import id_to_token
 
 def collate(batch):
     # トークン列の長さでソートする
