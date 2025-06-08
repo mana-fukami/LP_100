@@ -5,7 +5,7 @@
 """
 import numpy as np
 from gensim.models import KeyedVectors
-model_path="GoogleNews-vectors-negative300.bin"
+model_path="../GoogleNews-vectors-negative300.bin"
 model=KeyedVectors.load_word2vec_format(model_path,binary=True)
 
 id_to_token={}

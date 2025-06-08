@@ -11,10 +11,10 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from lesson70 import embedding_matrix,token_to_id,id_to_token
 
-train_tsv=open("SST-2/train.tsv","r")
+train_tsv=open("../SST-2/train.tsv","r")
 train_df=pd.read_csv(train_tsv,sep="\t")
 
-dev_tsv=open("SST-2/dev.tsv","r")
+dev_tsv=open("../SST-2/dev.tsv","r")
 dev_df=pd.read_csv(dev_tsv,sep="\t")
 
 class CustomDataset(Dataset):
@@ -140,5 +140,16 @@ accuracy=100*correct/total
 print(f"正解率: {accuracy:.2f}%")
 # 実行結果
 """
-
+Using cuda device
+Epoch 1/10, Loss: 0.5307021141052246
+Epoch 2/10, Loss: 0.5455406904220581
+Epoch 3/10, Loss: 0.4212304651737213
+Epoch 4/10, Loss: 0.42615070939064026
+Epoch 5/10, Loss: 0.4671330153942108
+Epoch 6/10, Loss: 0.37993860244750977
+Epoch 7/10, Loss: 0.4631999135017395
+Epoch 8/10, Loss: 0.28291910886764526
+Epoch 9/10, Loss: 0.3038240373134613
+Epoch 10/10, Loss: 0.3726625442504883
+正解率: 79.59%
 """
