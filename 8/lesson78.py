@@ -20,7 +20,7 @@ dev_df=pd.read_csv(dev_tsv,sep="\t")
 
 class CustomDataset(Dataset):
     def __init__(self,data_df):
-        token_id=self.text_to_token_id(data_df)
+        self.token_id=self.text_to_token_id(data_df)
 
     def __len__(self):
         return len(self.token_id)
@@ -136,5 +136,16 @@ accuracy=100*correct/total
 print(f"正解率: {accuracy:.2f}%")
 # 実行結果
 """
-
+Using cpu device
+Epoch 1/10, Loss: 0.15663787722587585
+Epoch 2/10, Loss: 0.30829697847366333
+Epoch 3/10, Loss: 0.2585207521915436
+Epoch 4/10, Loss: 0.08939235657453537
+Epoch 5/10, Loss: 0.04208642244338989
+Epoch 6/10, Loss: 0.0693623498082161
+Epoch 7/10, Loss: 0.06890696287155151
+Epoch 8/10, Loss: 0.25348448753356934
+Epoch 9/10, Loss: 0.046509385108947754
+Epoch 10/10, Loss: 0.2628816068172455
+正解率: 78.90%
 """
