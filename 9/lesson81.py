@@ -8,7 +8,7 @@ tokenizer=AutoTokenizer.from_pretrained("bert-base-uncased")
 model=AutoModelForMaskedLM.from_pretrained("bert-base-uncased")
 fill_mask=pipeline("fill-mask",model=model,tokenizer=tokenizer,top_k=1)
 
-# テキストのトークン化
+# 予測
 text="The movie was full of [MASK]."
 print(fill_mask(text))
 # 実行結果
