@@ -9,15 +9,18 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 import torch.nn.functional as F
 
+# トークナイザーとモデルのロード
 tokenizer=AutoTokenizer.from_pretrained("bert-base-uncased")
 model=AutoModel.from_pretrained("bert-base-uncased")
 
+# テキストの定義
 text1="The movie was full of fun."
 text2="The movie was full of excitement."
 text3="The movie was full of crap."
 text4="The movie was full of rubbish."
 texts=[text1, text2, text3, text4]
 
+# 各テキストの[CLS]トークンの埋め込みベクトルを取得
 cls_embeddings=[]
 for text in texts:
     # PyTorchのテンソルに形式でトークン化
@@ -28,6 +31,7 @@ for text in texts:
     last_hidden_state=outputs.last_hidden_state[:,0,:]
     cls_embeddings.append(last_hidden_state)
 
+# コサイン類似度の計算
 cosine_sim=[]
 for vec1 in cls_embeddings:
     sim=[]
