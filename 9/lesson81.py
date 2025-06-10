@@ -1,10 +1,12 @@
 """
 “The movie was full of [MASK].”の”[MASK]”を埋めるのに最も適切なトークンを求めよ。
 """
-from transformers import pipeline
+from transformers import AutoTokenizer,AutoModelForMaskedLM,pipeline
 
-# paielineのロード
-fill_mask=pipeline("fill-mask",model="bert-base-uncased",top_k=1)
+# 予測のための準備
+tokenizer=AutoTokenizer.from_pretrained("bert-base-uncased")
+model=AutoModelForMaskedLM.from_pretrained("bert-base-uncased")
+fill_mask=pipeline("fill-mask",model=model,tokenizer=tokenizer,top_k=1)
 
 # テキストのトークン化
 text="The movie was full of [MASK]."
