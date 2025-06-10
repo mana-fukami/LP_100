@@ -3,6 +3,8 @@
 という文をトークンに分解し、トークン列を表示せよ。
 """
 from transformers import AutoTokenizer
+# BertTokenizerはBertモデル専用のトークナイザー
+# AutoTokenizerはモデルに応じたトークナイザーを自動で選択してくれる
 
 # トークナイザーのロード
 tokenizer=AutoTokenizer.from_pretrained("bert-base-uncased")
