@@ -1,12 +1,14 @@
 """
 “The movie was full of [MASK].”の”[MASK]”に埋めるのに適切なトークン上位10個と、その確率（尤度）を求めよ。
 """
-from transformers import pipeline
+from transformers import AutoTokenizer,AutoModelForMaskedLM,pipeline
 
-# paielineのロード
-fill_mask=pipeline("fill-mask",model="bert-base-uncased",top_k=10)
+# 予測のための準備
+tokenizer=AutoTokenizer.from_pretrained("bert-base-uncased")
+model=AutoModelForMaskedLM.from_pretrained("bert-base-uncased")
+fill_mask=pipeline("fill-mask",model=model,tokenizer=tokenizer,top_k=10)
 
-# テキストのトークン化
+# 予測
 text="The movie was full of [MASK]."
 prediction=fill_mask(text)
 
