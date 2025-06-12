@@ -40,10 +40,12 @@ class CustomDataset(Dataset):
 train_dataset=CustomDataset(train_df)
 dev_dataset=CustomDataset(dev_df)
 
-print(train_dataset.__getitem__(10))
-print("--------------------")
-print(dev_dataset.__getitem__(10))
-# 実行結果
+def show_result():
+    print(train_dataset.__getitem__(10))
+    print("--------------------")
+    print(dev_dataset.__getitem__(10))
+
+#show_result()
 """
 {'text': 'goes to absurd lengths ', 'label': tensor(0.), 'tokens': ['goes', 'to', 'absurd', 'lengths']}
 --------------------
