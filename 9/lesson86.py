@@ -22,9 +22,9 @@ def CustomCollate(batch):
 
     return {"text":texts,"label":labels,"tokens":padded_tokens}
 
-batch=train_dataset[:4]
-padded_batch=CustomCollate(batch)
 def show_result():
+    batch=train_dataset[:4]
+    padded_batch=CustomCollate(batch)
     print(padded_batch)
 show_result()
 # 実行結果
