@@ -28,7 +28,7 @@ class CustomDataset(Dataset):
             d["text"]=text
             d["label"]=torch.tensor(label,dtype=torch.float32)
             # テキストをテンソル形式のトークン列に変換
-            d["tokens"]=tokenizer(text,return_tensors="pt")
+            d["tokens"]=tokenizer.tokenize(text)
             self.data.append(d)
 
     def __len__(self):
@@ -45,33 +45,23 @@ def show_result():
     print("--------------------")
     print(dev_dataset.__getitem__(10))
 
-#show_result()
+show_result()
 """
-{'text': 'goes to absurd lengths ', 'label': tensor(0.), 'tokens': {'input_ids': tensor([[  101,  3632,  2000, 18691, 10742,   102]]), 'token_type_ids': tensor([[0, 0, 0, 0, 0, 0]]), 'attention_mask': tensor([[1, 1, 1, 1, 1, 1]])}}
+{'text': 'goes to absurd lengths ', 'label': tensor(0.), 'tokens': ['goes', 'to', 'absurd', 'lengths']}
 --------------------
-{'text': 'the mesmerizing performances of the leads keep the film groundeilm grounded and keep the audience riveted . ', 'label': tensor(1.), 'tokens': {'input_ids': tensor([[  101,  1996,  2033,  6491, 11124,  6774,  4616,  1997,  1996,  5260,
-          2562,  1996,  2143, 16764,  1998,  2562,  1996,  4378, 15544, 19510,
-          2098,  1012,   102]]), 'token_type_ids': tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]), 'attention_mask': tensor([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]])}}
+{'text': 'the mesmerizing performances of the leads keep the film grounded and keep the audience riveted . ', 'label': tensor(1.), 'tokens': ['the', 'me', '##sm', '##eri', '##zing', 'performances', 'of', 'the', 'leads', 'keep', 'the', 'film', 'grounded', 'and', 'keep', 'the', 'audience', 'ri', '##vet', '##ed', '.']}
 """
 # 見やすく整理
 """
 {
     'text': 'goes to absurd lengths ',
     'label': tensor(0.),
-    'tokens': {
-        'input_ids': tensor([[  101,  3632,  2000, 18691, 10742,   102]]),
-        'token_type_ids': tensor([[0, 0, 0, 0, 0, 0]]),
-        'attention_mask': tensor([[1, 1, 1, 1, 1, 1]])
-    }
+    'tokens': ['goes', 'to', 'absurd', 'lengths']
 }
 --------------------
 {
-    'text': 'the mesmerizing performances of the leads keep the film groundeilm grounded and keep the audience riveted . ',
+    'text': 'the mesmerizing performances of the leads keep the film grounded and keep the audience riveted . ',
     'label': tensor(1.),
-    'tokens': {
-        'input_ids': tensor([[  101,  1996,  2033,  6491, 11124,  6774,  4616,  1997,  1996,  5260,  2562,  1996,  2143, 16764,  1998,  2562,  1996,  4378, 15544, 19510,  2098,  1012,   102]]),
-        'token_type_ids': tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]),
-        'attention_mask': tensor([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]])
-    }
+    'tokens': ['the', 'me', '##sm', '##eri', '##zing', 'performances', 'of', 'the', 'leads', 'keep', 'the', 'film', 'grounded', 'and', 'keep', 'the', 'audience', 'ri', '##vet', '##ed', '.']
 }
 """
