@@ -26,7 +26,7 @@ class CustomDataset(Dataset):
             # 極性ラベルの読み込み
             label=data_df.loc[i,"label"]
             d["text"]=text
-            d["label"]=torch.tensor(label,dtype=torch.float32)
+            d["label"]=torch.tensor(label,dtype=torch.int64)
             # テキストをテンソル形式のトークン列に変換
             d["tokens"]=tokenizer.tokenize(text)
             self.data.append(d)
@@ -47,21 +47,21 @@ def show_result():
 
 #show_result()
 """
-{'text': 'goes to absurd lengths ', 'label': tensor(0.), 'tokens': ['goes', 'to', 'absurd', 'lengths']}
+{'text': 'goes to absurd lengths ', 'label': tensor(0), 'tokens': ['goes', 'to', 'absurd', 'lengths']}
 --------------------
-{'text': 'the mesmerizing performances of the leads keep the film grounded and keep the audience riveted . ', 'label': tensor(1.), 'tokens': ['the', 'me', '##sm', '##eri', '##zing', 'performances', 'of', 'the', 'leads', 'keep', 'the', 'film', 'grounded', 'and', 'keep', 'the', 'audience', 'ri', '##vet', '##ed', '.']}
+{'text': 'the mesmerizing performances of the leads keep the film grounded and keep the audience riveted . ', 'label': tensor(1), 'tokens': ['the', 'me', '##sm', '##eri', '##zing', 'performances', 'of', 'the', 'leads', 'keep', 'the', 'film', 'grounded', 'and', 'keep', 'the', 'audience', 'ri', '##vet', '##ed', '.']}
 """
 # 見やすく整理
 """
 {
     'text': 'goes to absurd lengths ',
-    'label': tensor(0.),
+    'label': tensor(0),
     'tokens': ['goes', 'to', 'absurd', 'lengths']
 }
 --------------------
 {
     'text': 'the mesmerizing performances of the leads keep the film grounded and keep the audience riveted . ',
-    'label': tensor(1.),
+    'label': tensor(1),
     'tokens': ['the', 'me', '##sm', '##eri', '##zing', 'performances', 'of', 'the', 'leads', 'keep', 'the', 'film', 'grounded', 'and', 'keep', 'the', 'audience', 'ri', '##vet', '##ed', '.']
-}
+#}
 """
