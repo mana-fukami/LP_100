@@ -7,3 +7,4 @@ GoogleNews-vectors-negative300.bin
 8/model_weights.pth
 8/model.onnx
 8/model.pth
+myenv/
