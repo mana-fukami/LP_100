@@ -26,7 +26,7 @@ def show_result():
     batch=train_dataset[:4]
     padded_batch=CustomCollate(batch)
     print(padded_batch)
-show_result()
+#show_result()
 # 実行結果
 """
 {'text': ['hide new secretions from the parental units ', 'contains no wit , only labored gags ', 'that loves its characters and communicates something rather beautiful about human nature ', 'remains utterly satisfied to remain the same throughout '], 'label': tensor([0., 0., 1., 0.]), 'tokens': [['hide', 'new', 'secret', '##ions', 'from', 'the', 'parental', 'units', '', '', '', '', ''], ['contains', 'no', 'wit', ',', 'only', 'labor', '##ed', 'gag', '##s', '', '', '', ''], ['that', 'loves', 'its', 'characters', 'and', 'communicate', '##s', 'something', 'rather', 'beautiful', 'about', 'human', 'nature'], ['remains', 'utterly', 'satisfied', 'to', 'remain', 'the', 'same', 'throughout', '', '', '', '', '']]}
