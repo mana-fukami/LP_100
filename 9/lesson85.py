@@ -45,7 +45,7 @@ def show_result():
     print("--------------------")
     print(dev_dataset.__getitem__(10))
 
-show_result()
+#show_result()
 """
 {'text': 'goes to absurd lengths ', 'label': tensor(0.), 'tokens': ['goes', 'to', 'absurd', 'lengths']}
 --------------------
