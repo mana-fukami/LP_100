@@ -8,10 +8,10 @@ import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-train_tsv=open("SST-2/train.tsv","r")
+train_tsv=open("../SST-2/train.tsv","r")
 train_df=pd.read_csv(train_tsv,sep="\t")
 
-dev_tsv=open("SST-2/dev.tsv","r")
+dev_tsv=open("../SST-2/dev.tsv","r")
 dev_df=pd.read_csv(dev_tsv,sep="\t")
 
 tokenizer=AutoTokenizer.from_pretrained("bert-base-uncased")

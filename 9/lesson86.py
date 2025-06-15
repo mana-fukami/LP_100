@@ -14,7 +14,7 @@ def CustomCollate(batch):
     #テキストをパディングありでトークナイズする
     padded_tokens=tokenizer(texts,padding=True,return_tensors="pt")
 
-    return {"text":texts,"label":labels,"tokens":padded_tokens}
+    return {"labels":labels,"input_ids":padded_tokens["input_ids"],"attention_mask":padded_tokens["attention_mask"],"token_type_ids":padded_tokens["token_type_ids"]}
 
 def show_result():
     batch=train_dataset[:4]
