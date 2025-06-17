@@ -8,7 +8,7 @@ import numpy as np
 
 def CustomCollate(batch):
     #データを各項目についてまとめる
-    labels=torch.stack([item["label"] for item in batch])
+    labels=torch.tensor([item["label"] for item in batch])
     texts=[item["text"] for item in batch]
     tokens=[item["tokens"] for item in batch]
     #テキストをパディングありでトークナイズする
