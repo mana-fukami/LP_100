@@ -9,3 +9,4 @@ GoogleNews-vectors-negative300.bin
 8/model.pth
 myenv/
 results/
+results_maxpool/
