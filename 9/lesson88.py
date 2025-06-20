@@ -10,7 +10,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
 # ファインチューニング済みのモデルの読み込み
-model_dir="/home0/y2022/f2210543/LP_100/9/results/checkpoint-4210"
+model_dir="/home0/y2022/f2210543/LP_100/9/results/checkpoint-2106"
 model=AutoModelForSequenceClassification.from_pretrained(model_dir)
 tokenizer=AutoTokenizer.from_pretrained(model_dir)
 

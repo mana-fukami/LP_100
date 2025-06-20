@@ -60,51 +60,26 @@ trainer=Trainer(
 
 trainer.train()
 
-# モデルの評価
-model.eval()
-correct=0
-total=0
-
-dev_dataloader=DataLoader(dev_dataset,batch_size=64,shuffle=True, collate_fn=CustomCollate)
-with torch.no_grad(): #計算の高速化のために勾配計算を無効にする
-    for batch in dev_dataloader:
-        features=batch["input_ids"]
-        labels=batch["labels"].to(device).view(-1,1)
-
-        # モデルの出力を取得
-        outputs=model(features, attention_mask=batch["attention_mask"].to(device))
-        logits = outputs.logits
-
-        # 0.5を閾値として二値分類
-        preds = torch.argmax(logits, dim=1)
-
 # 正解率を計算
-print(f"正解率: {accuracy_score(labels,preds)}%")
+print(f"{trainer.evaluate()}%")
 """
-正解率: 0.925%
+{'eval_loss': 0.2684279680252075, 'eval_accuracy': 0.9197247706422018, 'eval_runtime': 1.4505, 'eval_samples_per_second': 601.187, 'eval_steps_per_second': 9.652, 'epoch': 3.0}
 """
 """
-/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
-  warnings.warn(
-Using cpu device
-/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
-  warnings.warn(
-Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
-You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
-Detected kernel version 5.4.0, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
-  0%|                                                                                                   | 0/6315 [00:00<?, ?it/s]/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
-  warnings.warn(warn_msg)
-{'loss': 0.2296, 'grad_norm': 8.906991958618164, 'learning_rate': 6.666666666666667e-06, 'epoch': 1.0}                           
-{'eval_loss': 0.23790372908115387, 'eval_accuracy': 0.9105504587155964, 'eval_runtime': 22.7996, 'eval_samples_per_second': 38.246, 'eval_steps_per_second': 1.228, 'epoch': 1.0}                                                                                 
- 33%|████████████████████████████                                                        | 2105/6315 [1:37:35<2:58:03,  2.54s/it/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
-  warnings.warn(warn_msg)
-{'loss': 0.1269, 'grad_norm': 2.5534024238586426, 'learning_rate': 3.3333333333333333e-06, 'epoch': 2.0}                         
-{'eval_loss': 0.2763686180114746, 'eval_accuracy': 0.9185779816513762, 'eval_runtime': 22.7488, 'eval_samples_per_second': 38.332, 'eval_steps_per_second': 1.231, 'epoch': 2.0}                                                                                  
- 67%|████████████████████████████████████████████████████████                            | 4210/6315 [3:15:13<1:18:09,  2.23s/it/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
-  warnings.warn(warn_msg)
-{'loss': 0.0922, 'grad_norm': 1.0613242387771606, 'learning_rate': 0.0, 'epoch': 3.0}                                            
-{'eval_loss': 0.30975887179374695, 'eval_accuracy': 0.9185779816513762, 'eval_runtime': 22.784, 'eval_samples_per_second': 38.272, 'eval_steps_per_second': 1.229, 'epoch': 3.0}                                                                                  
-{'train_runtime': 17582.5773, 'train_samples_per_second': 11.491, 'train_steps_per_second': 0.359, 'train_loss': 0.14959282591903578, 'epoch': 3.0}                                                                                                               
-100%|██████████████████████████████████████████████████████████████████████████████████████| 6315/6315 [4:53:02<00:00,  2.78s/it]
-正解率: 0.925%
+{'loss': 0.236, 'grad_norm': 8.854281425476074, 'learning_rate': 6.666666666666667e-06, 'epoch': 1.0}
+{'eval_loss': 0.23034018278121948, 'eval_accuracy': 0.911697247706422, 'eval_runtime': 1.5662, 'eval_samples_per_second': 556.767, 'eval_steps_per_second': 8.939, 'epoch': 1.0}
+ 33%|███████████████▋                               | 1053/3159 [04:23<07:38,  4.59it/s/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/nn/parallel/_functions.py:68: UserWarning: Was asked to gather along dimension 0, but all input tensors were scalars; will instead unsqueeze and return a vector.
+  warnings.warn('Was asked to gather along dimension 0, but all '
+{'loss': 0.133, 'grad_norm': 4.726690769195557, 'learning_rate': 3.3333333333333333e-06, 'epoch': 2.0}
+{'eval_loss': 0.2684279680252075, 'eval_accuracy': 0.9197247706422018, 'eval_runtime': 1.4541, 'eval_samples_per_second': 599.695, 'eval_steps_per_second': 9.628, 'epoch': 2.0}
+ 67%|███████████████████████████████▎               | 2106/3159 [08:57<03:51,  4.54it/s/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/nn/parallel/_functions.py:68: UserWarning: Was asked to gather along dimension 0, but all input tensors were scalars; will instead unsqueeze and return a vector.
+  warnings.warn('Was asked to gather along dimension 0, but all '
+{'loss': 0.1003, 'grad_norm': 1.181188702583313, 'learning_rate': 0.0, 'epoch': 3.0}    
+{'eval_loss': 0.27784305810928345, 'eval_accuracy': 0.9185779816513762, 'eval_runtime': 1.4594, 'eval_samples_per_second': 597.526, 'eval_steps_per_second': 9.593, 'epoch': 3.0}
+{'train_runtime': 825.2973, 'train_samples_per_second': 244.817, 'train_steps_per_second': 3.828, 'train_loss': 0.15642503410549471, 'epoch': 3.0}                              
+100%|███████████████████████████████████████████████| 3159/3159 [13:46<00:00,  3.82it/s]
+/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/nn/parallel/_functions.py:68: UserWarning: Was asked to gather along dimension 0, but all input tensors were scalars; will instead unsqueeze and return a vector.
+  warnings.warn('Was asked to gather along dimension 0, but all '
+100%|███████████████████████████████████████████████████| 14/14 [00:01<00:00, 10.52it/s]
+{'eval_loss': 0.2684279680252075, 'eval_accuracy': 0.9197247706422018, 'eval_runtime': 1.4505, 'eval_samples_per_second': 601.187, 'eval_steps_per_second': 9.652, 'epoch': 3.0}
 """
