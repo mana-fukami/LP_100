@@ -10,7 +10,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
 # ファインチューニング済みのモデルの読み込み
-model_dir="/home0/y2022/f2210543/LP_100/9/results/checkpoint-6315"
+model_dir="/home0/y2022/f2210543/LP_100/9/results/checkpoint-4210"
 model=AutoModelForSequenceClassification.from_pretrained(model_dir)
 tokenizer=AutoTokenizer.from_pretrained(model_dir)
 
@@ -30,9 +30,9 @@ for sentence in sentences:
     predictions=torch.argmax(outputs.logits,dim=1)
     print(f"sentence: {sentence} -> Prediction: {predictions.item()}")
 """
-sentence: The movie was full of incomprehensibilities. -> Prediction: 1
-sentence: The movie was full of fun. -> Prediction: 1
-sentence: The movie was full of excitement. -> Prediction: 1
-sentence: The movie was full of crap. -> Prediction: 1
-sentence: The movie was full of rubbish. -> Prediction: 1
+sentence: The movie was full of incomprehensibilities. -> Prediction: 0
+sentence: The movie was full of fun. -> Prediction: 0
+sentence: The movie was full of excitement. -> Prediction: 0
+sentence: The movie was full of crap. -> Prediction: 0
+sentence: The movie was full of rubbish. -> Prediction: 0
 """

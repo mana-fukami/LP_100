@@ -58,7 +58,7 @@ trainer=Trainer(
     callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
 )
 
-trainer.train(ignore_keys_for_eval=['last_hidden_state', 'hidden_states', 'attentions'])
+trainer.train()
 
 # モデルの評価
 model.eval()
@@ -81,18 +81,6 @@ with torch.no_grad(): #計算の高速化のために勾配計算を無効にす
 # 正解率を計算
 print(f"正解率: {accuracy_score(labels,preds)}%")
 """
-{'loss': 0.2282, 'grad_norm': 8.689830780029297, 'learning_rate': 6.666666666666667e-06, 'epoch': 1.0}                     
-{'eval_loss': 0.24760183691978455, 'eval_accuracy': 0.9094036697247706, 'eval_runtime': 22.6961, 'eval_samples_per_second': 38.421, 'eval_steps_per_second': 1.234, 'epoch': 1.0}                                                                     
- 33%|██████████████████████████                                                    | 2105/6315 [1:37:24<2:58:29,  2.54s/it/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
-  warnings.warn(warn_msg)
-{'loss': 0.1264, 'grad_norm': 2.5886433124542236, 'learning_rate': 3.3333333333333333e-06, 'epoch': 2.0}                   
-{'eval_loss': 0.27927762269973755, 'eval_accuracy': 0.9162844036697247, 'eval_runtime': 22.7006, 'eval_samples_per_second': 38.413, 'eval_steps_per_second': 1.233, 'epoch': 2.0}                                                                     
- 67%|████████████████████████████████████████████████████                          | 4210/6315 [3:15:16<1:18:25,  2.24s/it/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
-  warnings.warn(warn_msg)
-{'loss': 0.0916, 'grad_norm': 1.2597789764404297, 'learning_rate': 0.0, 'epoch': 3.0}                                      
-{'eval_loss': 0.3063053488731384, 'eval_accuracy': 0.9174311926605505, 'eval_runtime': 22.7235, 'eval_samples_per_second': 38.374, 'eval_steps_per_second': 1.232, 'epoch': 3.0}                                                                      
-{'train_runtime': 17598.0878, 'train_samples_per_second': 11.481, 'train_steps_per_second': 0.359, 'train_loss': 0.148732529834255, 'epoch': 3.0}                                                                                                     
-100%|████████████████████████████████████████████████████████████████████████████████| 6315/6315 [4:53:18<00:00,  2.79s/it]
 正解率: 0.925%
 """
 """
@@ -104,19 +92,19 @@ Using cpu device
 Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
 You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
 Detected kernel version 5.4.0, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
-  0%|                                                                                             | 0/6315 [00:00<?, ?it/s]/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  0%|                                                                                                   | 0/6315 [00:00<?, ?it/s]/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
   warnings.warn(warn_msg)
-{'loss': 0.2282, 'grad_norm': 8.689830780029297, 'learning_rate': 6.666666666666667e-06, 'epoch': 1.0}                     
-{'eval_loss': 0.24760183691978455, 'eval_accuracy': 0.9094036697247706, 'eval_runtime': 22.6961, 'eval_samples_per_second': 38.421, 'eval_steps_per_second': 1.234, 'epoch': 1.0}                                                                     
- 33%|██████████████████████████                                                    | 2105/6315 [1:37:24<2:58:29,  2.54s/it/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+{'loss': 0.2296, 'grad_norm': 8.906991958618164, 'learning_rate': 6.666666666666667e-06, 'epoch': 1.0}                           
+{'eval_loss': 0.23790372908115387, 'eval_accuracy': 0.9105504587155964, 'eval_runtime': 22.7996, 'eval_samples_per_second': 38.246, 'eval_steps_per_second': 1.228, 'epoch': 1.0}                                                                                 
+ 33%|████████████████████████████                                                        | 2105/6315 [1:37:35<2:58:03,  2.54s/it/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
   warnings.warn(warn_msg)
-{'loss': 0.1264, 'grad_norm': 2.5886433124542236, 'learning_rate': 3.3333333333333333e-06, 'epoch': 2.0}                   
-{'eval_loss': 0.27927762269973755, 'eval_accuracy': 0.9162844036697247, 'eval_runtime': 22.7006, 'eval_samples_per_second': 38.413, 'eval_steps_per_second': 1.233, 'epoch': 2.0}                                                                     
- 67%|████████████████████████████████████████████████████                          | 4210/6315 [3:15:16<1:18:25,  2.24s/it/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+{'loss': 0.1269, 'grad_norm': 2.5534024238586426, 'learning_rate': 3.3333333333333333e-06, 'epoch': 2.0}                         
+{'eval_loss': 0.2763686180114746, 'eval_accuracy': 0.9185779816513762, 'eval_runtime': 22.7488, 'eval_samples_per_second': 38.332, 'eval_steps_per_second': 1.231, 'epoch': 2.0}                                                                                  
+ 67%|████████████████████████████████████████████████████████                            | 4210/6315 [3:15:13<1:18:09,  2.23s/it/home0/y2022/f2210543/.pyenv/versions/3.10.13/lib/python3.10/site-packages/torch/utils/data/dataloader.py:665: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
   warnings.warn(warn_msg)
-{'loss': 0.0916, 'grad_norm': 1.2597789764404297, 'learning_rate': 0.0, 'epoch': 3.0}                                      
-{'eval_loss': 0.3063053488731384, 'eval_accuracy': 0.9174311926605505, 'eval_runtime': 22.7235, 'eval_samples_per_second': 38.374, 'eval_steps_per_second': 1.232, 'epoch': 3.0}                                                                      
-{'train_runtime': 17598.0878, 'train_samples_per_second': 11.481, 'train_steps_per_second': 0.359, 'train_loss': 0.148732529834255, 'epoch': 3.0}                                                                                                     
-100%|████████████████████████████████████████████████████████████████████████████████| 6315/6315 [4:53:18<00:00,  2.79s/it]
+{'loss': 0.0922, 'grad_norm': 1.0613242387771606, 'learning_rate': 0.0, 'epoch': 3.0}                                            
+{'eval_loss': 0.30975887179374695, 'eval_accuracy': 0.9185779816513762, 'eval_runtime': 22.784, 'eval_samples_per_second': 38.272, 'eval_steps_per_second': 1.229, 'epoch': 3.0}                                                                                  
+{'train_runtime': 17582.5773, 'train_samples_per_second': 11.491, 'train_steps_per_second': 0.359, 'train_loss': 0.14959282591903578, 'epoch': 3.0}                                                                                                               
+100%|██████████████████████████████████████████████████████████████████████████████████████| 6315/6315 [4:53:02<00:00,  2.78s/it]
 正解率: 0.925%
 """
