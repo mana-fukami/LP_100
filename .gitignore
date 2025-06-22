@@ -10,3 +10,4 @@ GoogleNews-vectors-negative300.bin
 myenv/
 results/
 kftt-data-1.0/
+results_maxpool/
