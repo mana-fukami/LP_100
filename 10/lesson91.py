@@ -2,8 +2,7 @@
 “The movie was full of”に続くテキストを複数予測せよ。
 このとき、デコーディングの方法や温度パラメータ（temperature）を変えながら、予測される複数のテキストの変化を観察せよ。
 """
-from transformers import AutoTokenizer,AutoModelForCausalLM,GPT2LMHeadModel
-import torch
+from transformers import AutoTokenizer,AutoModelForCausalLM
 
 # トークナイザーの読み込み
 tokenizer=AutoTokenizer.from_pretrained("openai-community/gpt2-medium")
