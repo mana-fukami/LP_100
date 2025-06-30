@@ -1,19 +1,11 @@
 """
-問題96のプロンプトに対して、正解の感情ラベルを含むテキストを望ましい応答、
-間違った感情ラベルを含むテキストを望ましくない応答として、
-事前学習済み言語モデルを選好チューニング (preference tuning) を実施せよ。
-選好チューニングのアルゴリズムとしては、
-近傍方策最適化 (PPO: Proximal Policy Optimization) や
-直接選好最適化 (DPO: Direct Preference Optimization) などが考えられる。
+問題96のプロンプトに対して、正解の感情ラベルをテキストの応答
+として返すように事前学習済みモデルをファインチューニングせよ。
 """
 import torch
-import torch.nn as nn
-from torch.utils.data import Dataset,DataLoader
-from transformers import AutoTokenizer,GPT2Model
+from transformers import AutoTokenizer,GPT2Model,Trainer,TrainingArguments
 import pandas as pd
-from sklearn.metrics import accuracy_score
-from tqdm import tqdm
-from trl import DPOTrainer,DPOConfig
+from datasets import Dataset
 
 # GPUに移動
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -27,69 +19,56 @@ model=GPT2Model("openai-community/gpt2-medium")
 tokenizer=AutoTokenizer.from_pretrained("openai-community/gpt2-medium")
 tokenizer.pad_token = tokenizer.eos_token # padトークンの定義
 
-# データセット
-class CustomDataset(Dataset):
-    def __init__(self,df,tokenizer,max_len=128):
-        self.texts=df["sentence"].tolist()
-        self.labels=df["label"].tolist()
-        self.tokenizer=tokenizer
-        self.max_len=max_len
+# 学習用テキスト作成
+def format_sst2(example):
+    text=example["sentence"]
+    label="positive" if example["label"]==1 else "negative"
+    return f"Review: {text}\nSentiment: {label}"
 
-    def __len__(self):
-        return len(self.labels)
+train_texts = [format_sst2(row) for _, row in train_df.iterrows()]
+dev_texts   = [format_sst2(row) for _, row in dev_df.iterrows()]
 
-    def __getitem__(self,idx):
-        encoding=self.tokenizer(
-            self.texts[idx],
-            padding="max_length",
-            truncation=True,
-            max_length=self.max_len,
-            return_tensors="pt"
-        )
-        return {
-            "texts":self.texts[idx],
-            "labels":torch.tensor(self.labels[idx],dtype=torch.long)
-        }
-train_dataset=CustomDataset(train_df,tokenizer)
-dev_dataset=CustomDataset(dev_df,tokenizer)
+# データセット化
+train_dataset=Dataset.from_dict({"text":train_texts})
+dev_dataset=Dataset.from_dict({"text":dev_texts})
 
-# Collate関数
-def CustomCollate(batch):
-    prompts=[]
-    chosen=[]
-    rejected=[]
-    for item in batch:
-        text=item["texts"]
-        label=item["labels"].item()
-        prompt = f"Review: {text}\nSentiment:"
-        prompts.append(prompt)
-        if label==1:
-            chosen.append(" positive")
-            rejected.append(" negative")
-        else:
-            chosen.append(" negative")
-            rejected.append(" positive")
-        return{
-            "prompts":prompts,
-            "chosen":chosen,
-            "rejected":rejected
-        }
+# tokenize
+def tokenize_fn(examples):
+    return tokenizer(examples["text"],truncation=True,padding="max_length",max_length=128)
 
-# DPO
-config=DPOConfig(
-    beta=0.1,
-    learning_rate=1e-5,
-    batch_size=2
+train_dataset=train_dataset.map(tokenize_fn,batched=True)
+train_dataset.est_format(type="torch",columns=["input_ids","attention_mask"])
+
+dev_dataset = dev_dataset.map(tokenize_fn, batched=True)
+dev_dataset.set_format(type="torch", columns=["input_ids", "attention_mask"])
+
+# モデルの設定
+model.resize_token_embeddings(len(tokenizer))
+model.config.pad_token_id = tokenizer.pad_token_id
+
+# 学習設定
+training_args=TrainingArguments(
+    output_dir="./results",
+    num_train_epochs=3,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    evaluation_strategy="epoch",
+    logging_steps=50,
+    save_strategy="epoch",
+    learning_rate=5e-5,
 )
 
-trainer=DPOTrainer(
-    model,
-    ref_model=None,
-    args=config,
-    beta=config.beta,
+trainer = Trainer(
+    model=model,
+    args=training_args,
     train_dataset=train_dataset,
-    data_collator=CustomCollate,
-    tokenizer=tokenizer,
+    eval_dataset=dev_dataset,
 )
 
+# ファインチューニング
 trainer.train()
+
+prompt = "Review: This movie was great!\nSentiment:"
+inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+outputs = model.generate(**inputs, max_new_tokens=5)
+print(tokenizer.decode(outputs[0]))
