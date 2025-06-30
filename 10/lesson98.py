@@ -19,8 +19,8 @@ from trl import DPOTrainer,DPOConfig
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # データ読み込み
-train_df=pd.read_csv("SST-2/train.tsv",sep="\t")
-dev_df=pd.read_csv("SST-2/dev.tsv",sep="\t")
+train_df=pd.read_csv("../SST-2/train.tsv",sep="\t")
+dev_df=pd.read_csv("../SST-2/dev.tsv",sep="\t")
 
 # モデルとトークナイザー
 model=GPT2Model("openai-community/gpt2-medium")
