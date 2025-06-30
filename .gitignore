@@ -8,6 +8,7 @@ GoogleNews-vectors-negative300.bin
 8/model.onnx
 8/model.pth
 myenv/
+myenv2/
 results/
 kftt-data-1.0/
 results_maxpool/
