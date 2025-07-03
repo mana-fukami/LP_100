@@ -6,6 +6,7 @@
 """
 from transformers import pipeline
 
+# チャットテンプレート → GPTへの入力を作るdef chat_template(user_iput)を作る
 chat=(
     "System: You are a helpful assistant. Please answer the following question.\n"
     "User: What do you call a sweet eaten after dinner?\n"

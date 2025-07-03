@@ -9,7 +9,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset,DataLoader
-from transformers import AutoTokenizer,GPT2Model
+from transformers import AutoTokenizer, GPT2LMHeadModel
 import pandas as pd
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
@@ -23,7 +23,7 @@ train_df=pd.read_csv("SST-2/train.tsv",sep="\t")
 dev_df=pd.read_csv("SST-2/dev.tsv",sep="\t")
 
 # モデルとトークナイザー
-model=GPT2Model("openai-community/gpt2-medium")
+model=GPT2LMHeadModel.from_pretrained("openai-community/gpt2-medium")
 tokenizer=AutoTokenizer.from_pretrained("openai-community/gpt2-medium")
 tokenizer.pad_token = tokenizer.eos_token # padトークンの定義
 
@@ -69,11 +69,11 @@ def CustomCollate(batch):
         else:
             chosen.append(" negative")
             rejected.append(" positive")
-        return{
-            "prompts":prompts,
-            "chosen":chosen,
-            "rejected":rejected
-        }
+    return{
+        "prompts":prompts,
+        "chosen":chosen,
+        "rejected":rejected
+    }
 
 # DPO
 config=DPOConfig(
