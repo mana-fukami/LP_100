@@ -64,14 +64,21 @@ tgt_vocab_size = len(en_token2id)
 
 # モデル読み込み
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = TransformerNMT(src_vocab_size, tgt_vocab_size).to(device)
+model = TransformerNMT(
+    src_vocab_size,
+    tgt_vocab_size,
+    d_model=512,
+    nhead=8,
+    num_layers=6,
+    dim_ff=2048
+).to(device)
 model.load_state_dict(torch.load("transformer_nmt.pt"))
 model.eval()
 
 # テストデータ読み込み
-with open("../kftt-data-1.0/data/tok/kyoto-test.ja") as f:
+with open("./kftt-data-1.0/data/tok/kyoto-test.ja") as f:
     test_ja = [line.strip().split() for line in f]
-with open("../kftt-data-1.0/data/tok/kyoto-test.en") as f:
+with open("./kftt-data-1.0/data/tok/kyoto-test.en") as f:
     test_en = [line.strip() for line in f]
 
 # 翻訳関数
@@ -108,3 +115,10 @@ for tokens in tqdm(test_ja):
 # sacreBLEU
 bleu = sacrebleu.corpus_bleu(hypotheses, [test_en])
 print(f"BLEU: {bleu.score:.2f}")
+"""
+100%|██████████████████████████████████████████████████████| 1160/1160 [02:16<00:00,  8.48it/s]
+That's 100 lines that end in a tokenized period ('.')
+It looks like you forgot to detokenize your test data, which may hurt your score.
+If you insist your data is detokenized, or don't care, you can suppress this message with the `force` parameter.
+BLEU: 6.57
+"""

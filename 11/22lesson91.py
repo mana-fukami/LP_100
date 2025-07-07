@@ -17,18 +17,18 @@ print("Using device:", device)
 
 # データの準備をする
 # -トークン化されたファイルを開く
-en_file=open("../kftt-data-1.0/data/tok/kyoto-train.en","r")
+en_file=open("./kftt-data-1.0/data/tok/kyoto-train.en","r",encoding="utf-8")
 en_lines=en_file.readlines()
-ja_file=open("../kftt-data-1.0/data/tok/kyoto-train.ja","r")
+ja_file=open("./kftt-data-1.0/data/tok/kyoto-train.ja","r",encoding="utf-8")
 ja_lines=ja_file.readlines()
 
 # -トークン列のリストを作る
 en_tokenized=[]
 for line in en_lines:
-    en_tokenized.append(line.split(" "))
+    en_tokenized.append(line.strip().split())
 ja_tokenized=[]
 for line in ja_lines:
-    ja_tokenized.append(line.split(" "))
+    ja_tokenized.append(line.strip().split())
 
 # -語彙の作成
 en_counter=Counter()
@@ -39,8 +39,9 @@ for tokens in ja_tokenized:
     ja_counter.update(tokens)
 
 # -頻度の高い順に並べる
-en_vocab_list=['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in en_counter.most_common()]
-ja_vocab_list=['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in ja_counter.most_common()]
+max_vocab_size = 50000
+en_vocab_list = ['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in en_counter.most_common(max_vocab_size)]
+ja_vocab_list=['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in ja_counter.most_common(max_vocab_size)]
 #print(f"vocab_size: {len(en_vocab_list)}")
 
 # -IDの辞書
@@ -158,62 +159,58 @@ def generate_square_subsequent_mask(sz):
 src_vocab_size = len(ja_token2id)
 tgt_vocab_size = len(en_token2id)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = TransformerNMT(src_vocab_size, tgt_vocab_size,d_model=128, nhead=4, num_layers=2, dim_ff=512
+model = TransformerNMT(
+    src_vocab_size,
+    tgt_vocab_size,
+    d_model=512,
+    nhead=8,
+    num_layers=6,
+    dim_ff=2048
 ).to(device)
 #model = nn.DataParallel(model)  # DataParallelでラップ
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, betas=(0.9,0.98), eps=1e-9)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
 pad_id = en_token2id['<pad>']
 criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
 
-num_epochs = 10
+num_epochs = 20
 for epoch in range(num_epochs):
     model.train()
     total_loss = 0
     
     # tqdmで進捗バーを作成
-    with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", unit="batch") as pbar:
-        for src_batch, tgt_batch in train_loader:
-            src_batch = src_batch.to(device)
-            tgt_batch = tgt_batch.to(device)
-            
-            tgt_input = tgt_batch[:, :-1]  # decoder入力
-            tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
+    for src_batch, tgt_batch in tqdm(train_loader):
+        src_batch = src_batch.to(device)
+        tgt_batch = tgt_batch.to(device)
+        
+        tgt_input = tgt_batch[:, :-1]  # decoder入力
+        tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
 
-            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
-            
-            src_pad_id = ja_token2id['<pad>']
-            tgt_pad_id = en_token2id['<pad>']
-            
-            optimizer.zero_grad()
-            
-            output = model(
-                src_batch,
-                tgt_input,
-                tgt_mask=tgt_mask,
-                src_padding_mask=(src_batch == src_pad_id),
-                tgt_padding_mask=(tgt_input == tgt_pad_id),
-                memory_key_padding_mask=(src_batch == src_pad_id)
-            )
-            
-            # 出力 shape [batch_size, tgt_len, vocab_size] → [batch_size * tgt_len, vocab_size]
-            output = output.reshape(-1, output.size(-1))
-            tgt_output = tgt_output.reshape(-1)
-            
-            #####
-            #print(f"output shape: {output.shape}")
-            #print(f"tgt_output shape: {tgt_output.shape}")
-            #print(f"pad_id: {pad_id}")
-            #print(f"tgt_output unique values: {torch.unique(tgt_output)}")
-            
-            loss = criterion(output, tgt_output)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            
-            total_loss += loss.item()
-
-            # tqdmの進捗バーに現在の損失を表示
-            pbar.set_postfix(loss=loss.item())
+        tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
+        
+        src_pad_id = ja_token2id['<pad>']
+        tgt_pad_id = en_token2id['<pad>']
+        
+        optimizer.zero_grad()
+        
+        output = model(
+            src_batch,
+            tgt_input,
+            tgt_mask=tgt_mask,
+            src_padding_mask=(src_batch == src_pad_id),
+            tgt_padding_mask=(tgt_input == tgt_pad_id),
+            memory_key_padding_mask=(src_batch == src_pad_id)
+        )
+        
+        # 出力 shape [batch_size, tgt_len, vocab_size] → [batch_size * tgt_len, vocab_size]
+        output = output.reshape(-1, output.size(-1))
+        tgt_output = tgt_output.reshape(-1)
+        
+        loss = criterion(output, tgt_output)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        
+        total_loss += loss.item()
     
     print(f"epoch {epoch+1} loss: {total_loss / len(train_loader):.4f}")
     torch.cuda.empty_cache()
@@ -227,3 +224,47 @@ with open("en_token2id.pkl", "wb") as f:
     pickle.dump(en_token2id, f)
 with open("en_id2token.pkl", "wb") as f:
     pickle.dump(en_id2token, f)
+
+"""
+Using device: cuda
+100%|████████████████████████████████████████████████████| 13759/13759 [29:22<00:00,  7.80it/s]
+epoch 1 loss: 5.6723
+100%|████████████████████████████████████████████████████| 13759/13759 [29:11<00:00,  7.86it/s]
+epoch 2 loss: 4.9794
+100%|████████████████████████████████████████████████████| 13759/13759 [29:19<00:00,  7.82it/s]
+epoch 3 loss: 4.7176
+100%|████████████████████████████████████████████████████| 13759/13759 [29:23<00:00,  7.80it/s]
+epoch 4 loss: 4.5419
+100%|████████████████████████████████████████████████████| 13759/13759 [29:18<00:00,  7.82it/s]
+epoch 5 loss: 4.4044
+100%|████████████████████████████████████████████████████| 13759/13759 [29:26<00:00,  7.79it/s]
+epoch 6 loss: 4.2881
+100%|████████████████████████████████████████████████████| 13759/13759 [28:59<00:00,  7.91it/s]
+epoch 7 loss: 4.1877
+100%|████████████████████████████████████████████████████| 13759/13759 [29:02<00:00,  7.89it/s]
+epoch 8 loss: 4.0993
+100%|████████████████████████████████████████████████████| 13759/13759 [28:56<00:00,  7.92it/s]
+epoch 9 loss: 4.0183
+100%|████████████████████████████████████████████████████| 13759/13759 [29:09<00:00,  7.87it/s]
+epoch 10 loss: 3.9441
+100%|████████████████████████████████████████████████████| 13759/13759 [29:12<00:00,  7.85it/s]
+epoch 11 loss: 3.8757
+100%|████████████████████████████████████████████████████| 13759/13759 [29:14<00:00,  7.84it/s]
+epoch 12 loss: 3.8127
+100%|████████████████████████████████████████████████████| 13759/13759 [28:52<00:00,  7.94it/s]
+epoch 13 loss: 3.7553
+100%|████████████████████████████████████████████████████| 13759/13759 [29:00<00:00,  7.90it/s]
+epoch 14 loss: 3.7005
+100%|████████████████████████████████████████████████████| 13759/13759 [28:59<00:00,  7.91it/s]
+epoch 15 loss: 3.6483
+100%|████████████████████████████████████████████████████| 13759/13759 [29:04<00:00,  7.89it/s]
+epoch 16 loss: 3.5991
+100%|████████████████████████████████████████████████████| 13759/13759 [29:08<00:00,  7.87it/s]
+epoch 17 loss: 3.5533
+100%|████████████████████████████████████████████████████| 13759/13759 [29:01<00:00,  7.90it/s]
+epoch 18 loss: 3.5104
+100%|████████████████████████████████████████████████████| 13759/13759 [29:13<00:00,  7.85it/s]
+epoch 19 loss: 3.4706
+100%|████████████████████████████████████████████████████| 13759/13759 [28:57<00:00,  7.92it/s]
+epoch 20 loss: 3.4340
+"""

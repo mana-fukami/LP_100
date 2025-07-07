@@ -63,7 +63,14 @@ tgt_vocab_size = len(en_token2id)
 
 # --- モデルの復元
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = TransformerNMT(src_vocab_size, tgt_vocab_size).to(device)
+model = TransformerNMT(
+    src_vocab_size,
+    tgt_vocab_size,
+    d_model=512,
+    nhead=8,
+    num_layers=6,
+    dim_ff=2048
+).to(device)
 model.load_state_dict(torch.load("transformer_nmt.pt"))
 model.eval()
 
@@ -108,3 +115,30 @@ while True:
         break
     translation = translate(jp_sentence)
     print("翻訳結果:", translation)
+
+"""
+日本語文> こんにちは
+翻訳結果: <unk>
+日本語文> 今日は雨です
+翻訳結果: <unk>
+日本語文> 私
+翻訳結果: <unk>
+日本語文> 彼女
+翻訳結果: She was her husband .
+日本語文> 彼女は私の友人です
+翻訳結果: <unk>
+日本語文> 雪舟は画家です
+翻訳結果: <unk>
+日本語文> 今日
+翻訳結果: Today
+日本語文> 雨
+翻訳結果: <unk>
+日本語文> 晴れ
+翻訳結果: <unk> ( a kind of rice cake )
+日本語文> 季節
+翻訳結果: <unk>
+日本語文> 春
+翻訳結果: Spring
+日本語文>  春が好きです
+翻訳結果: <unk>
+"""
