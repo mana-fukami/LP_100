@@ -116,9 +116,9 @@ for tokens in tqdm(test_ja):
 bleu = sacrebleu.corpus_bleu(hypotheses, [test_en])
 print(f"BLEU: {bleu.score:.2f}")
 """
-100%|██████████████████████████████████████████████████████| 1160/1160 [02:16<00:00,  8.48it/s]
+100%|██████████████████████████████████████████████████████| 1160/1160 [03:55<00:00,  4.93it/s]
 That's 100 lines that end in a tokenized period ('.')
 It looks like you forgot to detokenize your test data, which may hurt your score.
 If you insist your data is detokenized, or don't care, you can suppress this message with the `force` parameter.
-BLEU: 6.57
+BLEU: 11.72
 """
