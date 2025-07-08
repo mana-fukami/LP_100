@@ -80,7 +80,11 @@ def translate(sentence):
     # トークナイズする
     tagger=MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir")
     node=tagger.parseToNode(sentence)
-    tokens = [node.surface for nod in iter(node) if node.surface != ""]
+    tokens = []
+    while node:
+        if node.surface != "":
+            tokens.append(node.surface)
+        node = node.next
     ids = [ja_token2id.get(token, ja_token2id["<unk>"]) for token in tokens]
     src = torch.tensor([[ja_token2id["<sos>"]] + ids + [ja_token2id["<eos>"]]], device=device)
     
@@ -122,26 +126,13 @@ while True:
 """
 日本語文> こんにちは
 翻訳結果: <unk>
-日本語文> 今日は雨です
-翻訳結果: <unk>
-日本語文> 私
-翻訳結果: <unk>
-日本語文> 彼女
-翻訳結果: She was her husband .
+日本語文> 今日は晴れです
+翻訳結果: Today , the <unk> ( a <unk> ) is <unk> .
 日本語文> 彼女は私の友人です
-翻訳結果: <unk>
-日本語文> 雪舟は画家です
-翻訳結果: <unk>
-日本語文> 今日
-翻訳結果: Today
-日本語文> 雨
-翻訳結果: <unk>
-日本語文> 晴れ
-翻訳結果: <unk> ( a kind of rice cake )
-日本語文> 季節
-翻訳結果: <unk>
-日本語文> 春
-翻訳結果: Spring
-日本語文>  春が好きです
-翻訳結果: <unk>
+翻訳結果: She was a friend of her .
+日本語文> 夏よりも春が好きです
+翻訳結果: In summer , spring is also used for spring and spring .
+日本語文> 私は夏よりも春のほうが好きです
+翻訳結果: I have a good reputation for summer , but I have a good reputation than spring .
+日本語文> 
 """
