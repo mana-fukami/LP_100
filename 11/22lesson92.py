@@ -4,6 +4,7 @@
 """
 import torch
 import torch.nn as nn
+import MeCab
 
 # 学習時のTransformerNMTと同じ構造を再利用
 class PositionalEncoding(nn.Module):
@@ -76,8 +77,10 @@ model.eval()
 
 # --- 翻訳関数
 def translate(sentence):
-    # 単純な空白分かちトークン（例）
-    tokens = sentence.strip().split()
+    # トークナイズする
+    tagger=MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir")
+    node=tagger.parseToNode(sentence)
+    tokens = [node.surface for nod in iter(node) if node.surface != ""]
     ids = [ja_token2id.get(token, ja_token2id["<unk>"]) for token in tokens]
     src = torch.tensor([[ja_token2id["<sos>"]] + ids + [ja_token2id["<eos>"]]], device=device)
     
