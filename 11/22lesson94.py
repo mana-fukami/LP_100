@@ -8,7 +8,14 @@ import torch.nn.functional as F
 import sacrebleu
 import pickle
 import matplotlib.pyplot as plt
-from heapq import heappush, heappop
+from tqdm import tqdm
+import heapq
+import MeCab
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# GPUに移動する
+device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
 
 # モデルの定義（91と同じ）
 class PositionalEncoding(nn.Module):
@@ -93,7 +100,7 @@ class BeamNode:
         return self.logprob > other.logprob  # max-heap
 
 def beam_search_translate(src_sentence, beam_width=5, max_len=50):
-    tokens = src_sentence.strip().split()
+    tokens = src_sentence
     ids = [ja_token2id.get(t, ja_token2id['<unk>']) for t in tokens]
     src = torch.tensor([[ja_token2id['<sos>']] + ids + [ja_token2id['<eos>']]], device=device)
     src_padding_mask = (src == ja_token2id['<pad>'])
@@ -120,7 +127,7 @@ def beam_search_translate(src_sentence, beam_width=5, max_len=50):
                     memory_key_padding_mask=src_padding_mask
                 )
             # 出力の最後のトークンの分布
-            log_probs = F.log_softmax(out, dim=-1)
+            log_probs = F.log_softmax(out[:,-1,:], dim=-1)
             # 上位k個の候補を選ぶ
             topk_log_probs, topk_indices = log_probs.topk(beam_width)
 
@@ -147,9 +154,9 @@ def beam_search_translate(src_sentence, beam_width=5, max_len=50):
 
 # 開発データ読み込み
 with open("./kftt-data-1.0/data/tok/kyoto-dev.ja") as f:
-    dev_ja = [line.strip().split() for line in f]
+    dev_ja = [line.split(" ") for line in f]
 with open("./kftt-data-1.0/data/tok/kyoto-dev.en") as f:
-    dev_en = [line.strip() for line in f]
+    dev_en = [line for line in f]
 
 beam_widths=list(range(1, 101,10))
 bleu_scores = []
@@ -157,7 +164,9 @@ bleu_scores = []
 # BLEU計算
 for width in beam_widths:
     print(f"Beam width: {width}")
-    translations = [beam_search_translate(sent, beam_width=width) for sent in dev_ja]
+    translations = []
+    for sent in tqdm(dev_ja):
+        translations.append(beam_search_translate(sent, beam_width=width))
     bleu = sacrebleu.corpus_bleu(translations, [dev_en])
     print(f"BLEU: {bleu.score:.2f}")
     bleu_scores.append(bleu.score)
@@ -168,4 +177,6 @@ plt.xlabel('Beam Width')
 plt.ylabel('BLEU Score')
 plt.title('Beam Width vs BLEU Score')
 plt.grid(True)
-plt.show()
+#plt.show()
+plt.savefig('beam_width_vs_bleu.png', dpi=300, bbox_inches='tight')
+plt.close()
