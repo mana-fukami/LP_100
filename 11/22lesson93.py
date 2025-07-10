@@ -77,9 +77,9 @@ model.eval()
 
 # テストデータ読み込み
 with open("./kftt-data-1.0/data/tok/kyoto-test.ja") as f:
-    test_ja = [line.strip().split() for line in f]
+    test_ja = [line.split(" ") for line in f]
 with open("./kftt-data-1.0/data/tok/kyoto-test.en") as f:
-    test_en = [line.strip() for line in f]
+    test_en = [line for line in f]
 
 # 翻訳関数
 def translate(tokens, max_len=50):
@@ -116,9 +116,9 @@ for tokens in tqdm(test_ja):
 bleu = sacrebleu.corpus_bleu(hypotheses, [test_en])
 print(f"BLEU: {bleu.score:.2f}")
 """
-100%|██████████████████████████████████████████████████████| 1160/1160 [03:55<00:00,  4.93it/s]
+100%|█████████████████████████████████████████████████████████████████████████████████| 1160/1160 [03:18<00:00,  5.85it/s]
 That's 100 lines that end in a tokenized period ('.')
 It looks like you forgot to detokenize your test data, which may hurt your score.
 If you insist your data is detokenized, or don't care, you can suppress this message with the `force` parameter.
-BLEU: 11.72
+BLEU: 10.51
 """
