@@ -4,9 +4,11 @@
 """
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import sacrebleu
-from torch.utils.data import DataLoader
+import pickle
 import matplotlib.pyplot as plt
+from heapq import heappush, heappop
 
 # モデルの定義（91と同じ）
 class PositionalEncoding(nn.Module):
@@ -49,46 +51,6 @@ class TransformerNMT(nn.Module):
         )
         return self.output_layer(output.transpose(0,1))
 
-# 翻訳関数
-def generate_square_subsequent_mask(sz):
-    mask = torch.triu(torch.ones(sz, sz)) == 1
-    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-    return mask
-
-def beam_search_translate(model,src_tensor, beam_size=5, max_len=50):
-    model.eval()
-    with torch.no_grad():
-        src_padding_mask=(src_tensor == ja_token2id["<pad>"])
-        memory=model.transformer.encoder(
-            model.positional_encoding(model.src_embedding(src_tensor)).transpose(0,1),
-            src_key_padding_mask=src_padding_mask
-        )
-        beams=[(torch.tensor([en_token2id["<sos>"]], device=device), 0.0)]
-        for _ in range(max_len):
-            new_beams=[]
-            for seq, score in beams:
-                if seq[-1].item() == en_token2id["<eos>"]:
-                    new_beams.append((seq, score))
-                    continue
-                tgt_input = seq.unsqueeze(0)
-                tgt_mask = generate_square_subsequent_mask(tgt_input.size(1), device)
-                out = model.transformer.decoder(
-                    model.positional_encoding(model.tgt_embedding(tgt_input)).transpose(0, 1),
-                    memory,
-                    tgt_mask=tgt_mask,
-                    memory_key_padding_mask=src_padding_mask
-                )
-                logits = model.output_layer(out.transpose(0, 1))[:, -1, :]  # [1, vocab_size]
-                log_probs = torch.log_softmax(logits, dim=-1).squeeze(0)
-                topk_log_probs, topk_indices = torch.topk(log_probs, beam_size)
-                for i in range(beam_size):
-                    next_seq = torch.cat([seq, topk_indices[i].view(1)])
-                    next_score = score + topk_log_probs[i].item()
-                    new_beams.append((next_seq, next_score))
-            beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_size]
-        return beams[0][0]
-
-
 # 語彙読み込み
 import pickle
 with open("ja_token2id.pkl", "rb") as f:
@@ -114,7 +76,76 @@ model = TransformerNMT(
 model.load_state_dict(torch.load("transformer_nmt.pt"))
 model.eval()
 
-# テストデータ読み込み
+# マスク生成
+def generate_square_subsequent_mask(sz):
+    mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+    return mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, 0.0)
+
+# ビームサーチによる翻訳
+# --ビームサーチ：上位k個の候補文を並列に保持市ながら進め、各候補について次の語を生成し、上位k個を選びなおす
+class BeamNode:
+    def __init__(self, seq, logprob):
+        self.seq = seq # トークン列
+        self.logprob = logprob # 対数確率
+
+    def __lt__(self, other):
+        # 比較関数を定義して、ソート時に使用
+        return self.logprob > other.logprob  # max-heap
+
+def beam_search_translate(src_sentence, beam_width=5, max_len=50):
+    tokens = src_sentence.strip().split()
+    ids = [ja_token2id.get(t, ja_token2id['<unk>']) for t in tokens]
+    src = torch.tensor([[ja_token2id['<sos>']] + ids + [ja_token2id['<eos>']]], device=device)
+    src_padding_mask = (src == ja_token2id['<pad>'])
+
+    # ビームノードの初期化
+    beams = [BeamNode([en_token2id['<sos>']], 0.0)]
+    completed=[BeamNode([en_token2id['<sos>']], 0.0)]
+
+    # ビームサーチのメインループ
+    for _ in range(max_len):
+        new_beams = []
+        # 各候補について次の単語を予測する
+        for beam in beams:
+            tgt_input = torch.tensor([beam.seq], device=device)
+            tgt_mask = generate_square_subsequent_mask(len(beam.seq)).to(device)
+            # Transformerに現在のsrcとtgt_inputを入力
+            with torch.no_grad():
+                out = model(
+                    src,
+                    tgt_input,
+                    tgt_mask=tgt_mask,
+                    src_padding_mask=src_padding_mask,
+                    tgt_padding_mask=(tgt_input==en_token2id["<pad>"]),
+                    memory_key_padding_mask=src_padding_mask
+                )
+            # 出力の最後のトークンの分布
+            log_probs = F.log_softmax(out, dim=-1)
+            # 上位k個の候補を選ぶ
+            topk_log_probs, topk_indices = log_probs.topk(beam_width)
+
+            # 新しいビームノードを生成
+            for log_prob, idx in zip(topk_log_probs[0], topk_indices[0]):
+                new_seq = beam.seq + [idx.item()]
+                new_logprob = beam.logprob + log_prob.item()
+                # <eos>トークンが生成された場合は完了候補として別保存
+                if idx.item() == en_token2id['<eos>']:
+                    completed.append(BeamNode(new_seq, new_logprob))
+                new_beams.append(BeamNode(new_seq, new_logprob))
+
+        # 上位k個を再選択し、次の候補にする
+        beams = heapq.nlargest(beam_width, new_beams, key=lambda x: x.logprob)
+        if all(beam.seq[-1] == en_token2id['<eos>'] for beam in beams):
+            break
+
+    # 最も確率の高い完了候補orビーム候補を選択
+    if completed:
+        best = max(completed, key=lambda x: x.logprob)
+    else:
+        best = max(beams, key=lambda x: x.logprob)
+    return ' '.join(en_id2token[idx] for idx in best.seq[1:-1])  # remove <sos> and <eos>
+
+# 開発データ読み込み
 with open("./kftt-data-1.0/data/tok/kyoto-dev.ja") as f:
     dev_ja = [line.strip().split() for line in f]
 with open("./kftt-data-1.0/data/tok/kyoto-dev.en") as f:
@@ -124,18 +155,12 @@ beam_widths=list(range(1, 101,10))
 bleu_scores = []
 
 # BLEU計算
-for beam in beam_widths:
-    print(f"Beam width: {beam}")
-    preds = []
-    refs = []
-    for ja_sent, en_sent in zip(dev_ja[:100], dev_en[:100]):
-        out_tokens = beam_search_translate(model, ja_sent, ja_token2id, en_token2id, en_id2token, beam_width=beam, device='cuda')
-        pred_sent = ' '.join(out_tokens)
-        preds.append(pred_sent)
-        refs.append([en_sent])
-    bleu = sacrebleu.corpus_bleu(preds, refs).score
-    print(f"BLEU = {bleu:.2f}")
-    bleu_scores.append(bleu)
+for width in beam_widths:
+    print(f"Beam width: {width}")
+    translations = [beam_search_translate(sent, beam_width=width) for sent in dev_ja]
+    bleu = sacrebleu.corpus_bleu(translations, [dev_en])
+    print(f"BLEU: {bleu.score:.2f}")
+    bleu_scores.append(bleu.score)
 
 # 結果のプロット
 plt.plot(beam_widths, bleu_scores, marker='o')
