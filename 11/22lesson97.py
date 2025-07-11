@@ -1,10 +1,11 @@
 """
-Tensorboardなどのツールを用い,ニューラル機械翻訳モデルが学習されていく過程を可視化せよ.
-可視化する項目としては,
-    - 学習データにおける損失関数の値とBLEUスコア
-    - 開発データにおける損失関数の値とBLEUスコア
-などを採用せよ.
-可視化はTensorboard or [WandB https://www.wandb.jp/]を使うこと (WandBのほうが簡単なのでおすすめ)
+ニューラルネットワークのモデルや,そのハイパーパラメータを変更しつつ,開発データにおけるBLEUスコアが
+最大となるモデルとハイパーパラメータを求めよ．
+チューニングを行うハイパーパラメータは項目は以下とすること
+    バッチサイズ
+    学習率(1e-3~1e-6)
+    Optimizer (Adam, AdamW, RAdamなどAdam系をいくつか)
+最終的にBLUEスコアは10以上になることを確認すること
 """
 import wandb
 import torch
@@ -16,6 +17,9 @@ from tqdm import tqdm
 import math
 import os
 from nltk.translate.bleu_score import sentence_bleu
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 # GPUに移動する
@@ -86,9 +90,6 @@ def Collate(batch):
     src_batch = pad_sequence(src_batch, padding_value=ja_token2id['<pad>'], batch_first=True)
     tgt_batch = pad_sequence(tgt_batch, padding_value=en_token2id['<pad>'], batch_first=True)
     return src_batch, tgt_batch
-
-train_dataset=TranslationDataset(ja_ids,en_ids)
-train_loader=DataLoader(train_dataset,batch_size=32,shuffle=True,collate_fn=Collate,num_workers=4)
 
 # 文の順序を保持するための位置エンコーディング
 class PositionalEncoding(nn.Module):
@@ -209,7 +210,6 @@ model = TransformerNMT(
     dim_ff=2048
 ).to(device)
 #model = nn.DataParallel(model)  # DataParallelでラップ
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
 pad_id = en_token2id['<pad>']
 criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
 
@@ -218,77 +218,90 @@ key=open("AllKeys/wandb.txt").readline()
 wandb.login(key=key)
 
 # Wndbの初期化
-wandb.init(project="22lesson96")
+wandb.init(project="22lesson97")
 
 # ハイパーパラメータの設定
 wandb.config.epochs=20
 
-for epoch in range(2,wandb.config.epochs):
+def train_roop(train_loader,optimizer):
     model.train()
-    total_loss = 0
-    
-    # tqdmで進捗バーを作成
-    for src_batch, tgt_batch in tqdm(train_loader):
-        src_batch = src_batch.to(device)
-        tgt_batch = tgt_batch.to(device)
+    for epoch in range(2,wandb.config.epochs):
+        model.train()
+        total_loss = 0
         
-        tgt_input = tgt_batch[:, :-1]  # decoder入力
-        tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
+        # tqdmで進捗バーを作成
+        for src_batch, tgt_batch in tqdm(train_loader):
+            src_batch = src_batch.to(device)
+            tgt_batch = tgt_batch.to(device)
+            
+            tgt_input = tgt_batch[:, :-1]  # decoder入力
+            tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
 
-        tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
-        
-        src_pad_id = ja_token2id['<pad>']
-        tgt_pad_id = en_token2id['<pad>']
-        
-        optimizer.zero_grad()
-        
-        output = model(
-            src_batch,
-            tgt_input,
-            tgt_mask=tgt_mask,
-            src_padding_mask=(src_batch == src_pad_id),
-            tgt_padding_mask=(tgt_input == tgt_pad_id),
-            memory_key_padding_mask=(src_batch == src_pad_id)
-        )
-        
-        # 出力 shape [batch_size, tgt_len, vocab_size] → [batch_size * tgt_len, vocab_size]
-        output = output.reshape(-1, output.size(-1))
-        tgt_output = tgt_output.reshape(-1)
-        
-        loss = criterion(output, tgt_output)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-        
-        total_loss += loss.item()
+            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
+            
+            src_pad_id = ja_token2id['<pad>']
+            tgt_pad_id = en_token2id['<pad>']
+            
+            optimizer.zero_grad()
+            
+            output = model(
+                src_batch,
+                tgt_input,
+                tgt_mask=tgt_mask,
+                src_padding_mask=(src_batch == src_pad_id),
+                tgt_padding_mask=(tgt_input == tgt_pad_id),
+                memory_key_padding_mask=(src_batch == src_pad_id)
+            )
+            
+            # 出力 shape [batch_size, tgt_len, vocab_size] → [batch_size * tgt_len, vocab_size]
+            output = output.reshape(-1, output.size(-1))
+            tgt_output = tgt_output.reshape(-1)
+            
+            loss = criterion(output, tgt_output)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            
+            total_loss += loss.item()
 
-    # BLUEスコアの計算
-    bleu_score = calculate_bleu_score(
-        model,
-        train_loader,
-        ja_id2token,
-        en_id2token,
-        device
+batch_size=[32,64]
+learning_rates = [1e-3, 1e-4, 1e-5]
+optimizers = ['Adam', 'AdamW', 'RAdam']
+
+def get_optimizer(optimizer_name, learning_rate):
+    if optimizer_name == 'Adam':
+        return torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.98), eps=1e-9)
+    elif optimizer_name == 'AdamW':
+        return torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(0.9, 0.98), eps=1e-9)
+    elif optimizer_name == 'RAdam':
+        return torch.optim.RAdam(model.parameters(), lr=learning_rate, betas=(0.9, 0.98), eps=1e-9)
+    else:
+        raise ValueError(f"Unknown optimizer: {optimizer_name}")
+
+result_df = pd.DataFrame(columns=['batch_size', 'learning_rate', 'optimizer', 'bleu_score'])
+for batch in batch_size:
+    train_dataset=TranslationDataset(ja_ids,en_ids)
+    train_loader=DataLoader(train_dataset,batch_size=batch,shuffle=True,collate_fn=Collate,num_workers=4)
+    for lr in learning_rates:
+        for opt in optimizers:
+            optimizer = get_optimizer(opt,lr)
+            train_roop(train_loader=train_loader,optimizer=optimizer)
+            blue_score= calculate_bleu_score(model, train_loader, ja_id2token, en_id2token, device)
+            result_df["batch_size"]=batch
+            result_df["learning_rate"]=lr
+            result_df["optimizer"]=opt
+            result_df["bleu_score"]=blue_score
+            # 学習率を文字列にして見やすくする
+            result_df["lr_str"] = result_df["lr"].apply(lambda x: f"{x:.0e}")
+
+# 結果のヒートマップ
+g = sns.FacetGrid(result_df, col="optimizer", height=4)
+g.map_dataframe(
+    lambda data, color: sns.heatmap(
+        data.pivot("batch_size", "lr_str", "bleu"),
+        annot=True, fmt=".2f", cmap="viridis", cbar=False
     )
-    # Wandbへの記録
-    wandb.log(
-        {
-            "bleu_score":bleu_score,
-            "loss":total_loss/len(train_loader),
-        }
-    )
-    print(f"epoch {epoch+1} loss: {total_loss / len(train_loader):.4f}")
-    torch.cuda.empty_cache()
-wandb.finish()
-
-"""
-# モデルと語彙の保存(次で使えるように)
-torch.save(model.state_dict(), "transformer_nmt.pt")
-import pickle
-with open("ja_token2id.pkl", "wb") as f:
-    pickle.dump(ja_token2id, f)
-with open("en_token2id.pkl", "wb") as f:
-    pickle.dump(en_token2id, f)
-with open("en_id2token.pkl", "wb") as f:
-    pickle.dump(en_id2token, f)
-"""
+)
+plt.suptitle("BLEUスコア比較（各オプティマイザ）", y=1.05)
+plt.savefig('hyper_tuning.png', dpi=300, bbox_inches='tight')
+plt.close()
