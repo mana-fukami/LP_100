@@ -1,12 +1,7 @@
 """
-Tensorboardなどのツールを用い,ニューラル機械翻訳モデルが学習されていく過程を可視化せよ.
-可視化する項目としては,
-    - 学習データにおける損失関数の値とBLEUスコア
-    - 開発データにおける損失関数の値とBLEUスコア
-などを採用せよ.
-可視化はTensorboard or [WandB https://www.wandb.jp/]を使うこと (WandBのほうが簡単なのでおすすめ)
+Japanese-English Subtitle Corpus (JESC)やJParaCrawlなどの
+翻訳データを活用し，KFTTのテストデータの性能向上を試みよ．
 """
-import wandb
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset,DataLoader
@@ -15,27 +10,38 @@ from collections import Counter
 from tqdm import tqdm
 import math
 import os
-from nltk.translate.bleu_score import sentence_bleu
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+import MeCab
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # GPUに移動する
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
 # データの準備をする
-# -トークン化されたファイルを開く
-en_file=open("./kftt-data-1.0/data/tok/kyoto-train.en","r",encoding="utf-8")
-en_lines=en_file.readlines()
-ja_file=open("./kftt-data-1.0/data/tok/kyoto-train.ja","r",encoding="utf-8")
-ja_lines=ja_file.readlines()
+# -ファイルを開く
+en_ja_file=open("./split/train","r",encoding="utf-8")
+en_ja_lines=en_ja_file.readlines()
+en_lines=[]
+ja_lines=[]
+for line in en_ja_lines:
+    en_ja=line.strip().split("\t")
+    en_lines.append(en_ja[0])
+    ja_lines.append(en_ja[1])
 
 # -トークン列のリストを作る
-en_tokenized=[]
-for line in en_lines:
-    en_tokenized.append(line.strip().split())
+tagger=MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir")
 ja_tokenized=[]
 for line in ja_lines:
-    ja_tokenized.append(line.strip().split())
+    node=tagger.parseToNode(line.strip())
+    tokens = []
+    while node:
+        if node.surface != "":
+            tokens.append(node.surface)
+        node = node.next
+    ja_tokenized.append(tokens)
+en_tokenized=[]
+for line in en_lines:
+    tokens=line.strip().split(" ")
+    en_tokenized.append(tokens)
 
 # -語彙の作成
 en_counter=Counter()
@@ -162,40 +168,6 @@ def generate_square_subsequent_mask(sz):
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
     return mask
 
-def calculate_bleu_score(model, data_loader, ja_id2token, en_id2token, device):
-    model.eval()
-    total_bleu = 0
-    with torch.no_grad():
-        for src_batch, tgt_batch in data_loader:
-            src_batch = src_batch.to(device)
-            tgt_batch = tgt_batch.to(device)
-
-            tgt_input = tgt_batch[:, :-1]  # decoder入力
-            tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
-
-            # 推論
-            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
-            src_pad_id = ja_token2id['<pad>']
-            tgt_pad_id = en_token2id['<pad>']
-
-            output = model(
-                src_batch,
-                tgt_input,
-                tgt_mask=tgt_mask,
-                src_padding_mask=(src_batch == src_pad_id),
-                tgt_padding_mask=(tgt_input == tgt_pad_id),
-                memory_key_padding_mask=(src_batch == src_pad_id)
-            )
-
-            # 出力をデコード
-            output = torch.argmax(output, dim=-1)  # [batch_size, tgt_len]
-            for pred, target in zip(output, tgt_output):
-                pred_tokens = [en_id2token[idx.item()] for idx in pred if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-                target_tokens = [en_id2token[idx.item()] for idx in target if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-                total_bleu += sentence_bleu([target_tokens], pred_tokens)
-
-    return total_bleu / len(data_loader)
-
 # 学習ループ
 src_vocab_size = len(ja_token2id)
 tgt_vocab_size = len(en_token2id)
@@ -209,21 +181,13 @@ model = TransformerNMT(
     dim_ff=2048
 ).to(device)
 #model = nn.DataParallel(model)  # DataParallelでラップ
+model.load_state_dict(torch.load("transformer_nmt.pt"))
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
 pad_id = en_token2id['<pad>']
 criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
 
-# Wndbのログイン
-key=open("AllKeys/wandb.txt").readline()
-wandb.login(key=key)
-
-# Wndbの初期化
-wandb.init(project="22lesson96")
-
-# ハイパーパラメータの設定
-wandb.config.epochs=20
-
-for epoch in range(2,wandb.config.epochs):
+num_epochs = 20
+for epoch in range(num_epochs):
     model.train()
     total_loss = 0
     
@@ -261,34 +225,9 @@ for epoch in range(2,wandb.config.epochs):
         optimizer.step()
         
         total_loss += loss.item()
-
-    # BLUEスコアの計算
-    bleu_score = calculate_bleu_score(
-        model,
-        train_loader,
-        ja_id2token,
-        en_id2token,
-        device
-    )
-    # Wandbへの記録
-    wandb.log(
-        {
-            "bleu_score":bleu_score,
-            "loss":total_loss/len(train_loader),
-        }
-    )
+    
     print(f"epoch {epoch+1} loss: {total_loss / len(train_loader):.4f}")
     torch.cuda.empty_cache()
-wandb.finish()
 
-"""
 # モデルと語彙の保存(次で使えるように)
-torch.save(model.state_dict(), "transformer_nmt.pt")
-import pickle
-with open("ja_token2id.pkl", "wb") as f:
-    pickle.dump(ja_token2id, f)
-with open("en_token2id.pkl", "wb") as f:
-    pickle.dump(en_token2id, f)
-with open("en_id2token.pkl", "wb") as f:
-    pickle.dump(en_id2token, f)
-"""
+torch.save(model.state_dict(), "add_train_transformer_nmt.pt")

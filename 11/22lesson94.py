@@ -10,7 +10,6 @@ import pickle
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import heapq
-import MeCab
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # GPUに移動する
@@ -153,10 +152,10 @@ def beam_search_translate(src_sentence, beam_width=5, max_len=50):
     return ' '.join(en_id2token[idx] for idx in best.seq[1:-1])  # remove <sos> and <eos>
 
 # 開発データ読み込み
-with open("./kftt-data-1.0/data/tok/kyoto-dev.ja") as f:
-    dev_ja = [line.split(" ") for line in f]
-with open("./kftt-data-1.0/data/tok/kyoto-dev.en") as f:
-    dev_en = [line for line in f]
+with open("./kftt-data-1.0/data/tok/kyoto-dev.ja","r",encoding="utf-8") as f:
+    dev_ja = [line.strip().split(" ") for line in f]
+with open("./kftt-data-1.0/data/tok/kyoto-dev.en","r",encoding="utf-8") as f:
+    dev_en = [line.strip() for line in f]
 
 beam_widths=list(range(1, 101,10))
 bleu_scores = []

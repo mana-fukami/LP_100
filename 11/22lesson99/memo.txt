@@ -1,0 +1,20 @@
+ユーザが翻訳したい文を入力すると，その翻訳結果がウェブブラウザ上で表示されるデモシステムを構築せよ．
+	翻訳サーバの実装にはflaskを使うこと
+		streamlitやgradioは簡単すぎるのでここではNG
+
+translator_app/
+│
+├── app.py              # Flaskアプリ本体
+├── templates/
+│   └── index.html      # 入力フォーム + 結果表示
+├── static/             # （必要ならCSSなど）
+├── model/
+│   ├── model.pt
+│   ├── ja_token2id.pkl
+│   ├── en_token2id.pkl
+│   └── en_id2token.pkl
+└── model_def.py        # Transformerと前処理関数
+
+実行方法
+cd translator_app
+python app.py
