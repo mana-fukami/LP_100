@@ -11,6 +11,10 @@ myenv/
 myenv2/
 results/
 kftt-data-1.0/
+split/
+wandb/
 results_maxpool/
 *.pkl
 *.pt
+*.model
+*.vocab

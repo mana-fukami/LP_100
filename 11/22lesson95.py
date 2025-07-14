@@ -10,7 +10,9 @@ from tqdm import tqdm
 import math
 import sacrebleu
 import matplotlib.pyplot as plt
-import setencepiece as spm
+import sentencepiece as spm
+import torch.nn.functional as F
+import heapq
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 # GPUに移動する
@@ -19,25 +21,27 @@ print("Using device:", device)
 
 # サブワード単位に分割できるように、SentencePieceを学習する
 # -学習データ読み込み
-with open("./kftt-data-1.0/data/tok/kyoto-train.ja") as f:
+with open("./kftt-data-1.0/data/tok/kyoto-train.ja","r",encoding="utf-8") as f:
     train_ja = f.readlines()
-with open("./kftt-data-1.0/data/tok/kyoto-train.en") as f:
+with open("./kftt-data-1.0/data/tok/kyoto-train.en","r",encoding="utf-8") as f:
     train_en = f.readlines()
 # -日本語用モデル
 spm.SentencePieceTrainer.train(
-    input=train_ja,
+    input="./kftt-data-1.0/data/tok/kyoto-train.ja",
     model_prefix="ja_spm",
     vocab_size=16000,
     character_coverage=1.0,
-    model_type="bpe"
+    model_type="bpe",
+    pad_id=3
 )
 # -英語用モデル
 spm.SentencePieceTrainer.train(
-    input=train_en,
+    input="./kftt-data-1.0/data/tok/kyoto-train.en",
     model_prefix="en_spm",
     vocab_size=16000,
     character_coverage=1.0,
-    model_type="bpe"
+    model_type="bpe",
+    pad_id=3
 )
 # -トークン化されたデータの再生成
 sp_ja= spm.SentencePieceProcessor(model_file="ja_spm.model")
@@ -47,8 +51,8 @@ ja_tokenized= [sp_ja.encode_as_ids(line.strip()) for line in train_ja]
 en_tokenized= [sp_en.encode_as_ids(line.strip()) for line in train_en]
 
 # -数値列に変換
-ja_ids=[[sp_ja.bos_id()]+ids+[sp_ja.eos_id()] for ids in ja_tokenized]  # <sos>と<eos>を追加
-en_ids=[[sp_en.bos_id()]+ids+[sp_en.eos_id()] for ids in en_tokenized]  # <sos>と<eos>を追加
+ja_ids = [[sp_ja.bos_id()] + ids + [sp_ja.eos_id()] for ids in ja_tokenized]
+en_ids = [[sp_en.bos_id()] + ids + [sp_en.eos_id()] for ids in en_tokenized]
 
 # -データセット化
 class TranslationDataset(Dataset):
@@ -64,12 +68,12 @@ class TranslationDataset(Dataset):
 
 def Collate(batch):
     src_batch, tgt_batch = zip(*batch)  # バッチの中のサンプルを分ける
-    src_batch = pad_sequence(src_batch, padding_value=ja_token2id['<pad>'], batch_first=True)
-    tgt_batch = pad_sequence(tgt_batch, padding_value=en_token2id['<pad>'], batch_first=True)
+    src_batch = pad_sequence(src_batch, padding_value=sp_ja.pad_id(), batch_first=True)
+    tgt_batch = pad_sequence(tgt_batch, padding_value=sp_en.pad_id(), batch_first=True)
     return src_batch, tgt_batch
 
 train_dataset=TranslationDataset(ja_ids,en_ids)
-train_loader=DataLoader(train_dataset,batch_size=32,shuffle=True,collate_fn=Collate,num_workers=4)
+train_loader=DataLoader(train_dataset,batch_size=32,shuffle=True,collate_fn=Collate)
 
 #モデルの学習
 # 文の順序を保持するための位置エンコーディング
@@ -145,8 +149,25 @@ def generate_square_subsequent_mask(sz):
     return mask
 
 # 学習ループ
-src_vocab_size = len(ja_token2id)
-tgt_vocab_size = len(en_token2id)
+src_vocab_size = max(
+    max([max(ids) for ids in ja_ids]),
+    sp_ja.bos_id(),
+    sp_ja.eos_id(),
+    sp_ja.pad_id(),
+    sp_ja.unk_id()
+) + 1
+tgt_vocab_size = max(
+    max([max(ids) for ids in en_ids]),
+    sp_en.bos_id(),
+    sp_en.eos_id(),
+    sp_en.pad_id(),
+    sp_en.unk_id()
+) + 1
+print("---- ID CHECK ----")
+print(f"sp_ja vocab size: {sp_ja.get_piece_size()}")
+print(f"sp_ja <bos>: {sp_ja.bos_id()}, <eos>: {sp_ja.eos_id()}, <pad>: {sp_ja.pad_id()}, <unk>: {sp_ja.unk_id()}")
+print(f"Max src ID in ja_ids: {max([max(ids) for ids in ja_ids])}")
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = TransformerNMT(
     src_vocab_size,
@@ -158,7 +179,7 @@ model = TransformerNMT(
 ).to(device)
 #model = nn.DataParallel(model)  # DataParallelでラップ
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
-pad_id = en_token2id['<pad>']
+pad_id = sp_en.pad_id()
 criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
 
 num_epochs = 20
@@ -176,8 +197,8 @@ for epoch in range(num_epochs):
 
         tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
 
-        src_pad_id = ja_token2id['<pad>']
-        tgt_pad_id = en_token2id['<pad>']
+        src_pad_id = sp_ja.pad_id()
+        tgt_pad_id = sp_en.pad_id()
 
         optimizer.zero_grad()
 
@@ -217,10 +238,9 @@ with open("./kftt-data-1.0/data/orig/kyoto-test.en") as f:
 # 翻訳関数
 def translate(sentence, max_len=50):
     tokens=sp_ja.encode_as_ids(sentence)
-    ids = [ja_token2id.get(tok, ja_token2id["<unk>"]) for tok in tokens]
-    src = torch.tensor([[ja_token2id["<sos>"]] + ids + [ja_token2id["<eos>"]]], device=device)
-    src_padding_mask = (src == ja_token2id["<pad>"])
-    generated = [en_token2id["<sos>"]]
+    src = torch.tensor([[sp_ja.bos_id()] + tokens + [sp_ja.eos_id()]], device=device)
+    src_padding_mask = (src == sp_ja.pad_id())
+    generated = [sp_en.bos_id()]
     for _ in range(max_len):
         tgt_input = torch.tensor([generated], device=device)
         tgt_mask = torch.triu(torch.ones(tgt_input.size(1), tgt_input.size(1), device=device) == 1).transpose(0, 1)
@@ -231,12 +251,12 @@ def translate(sentence, max_len=50):
                 tgt_input,
                 tgt_mask=tgt_mask,
                 src_padding_mask=src_padding_mask,
-                tgt_padding_mask=(tgt_input==en_token2id["<pad>"]),
+                tgt_padding_mask=(tgt_input==sp_en.pad_id()),
                 memory_key_padding_mask=src_padding_mask
             )
         next_token = out[0, -1].argmax(-1).item()
         generated.append(next_token)
-        if next_token == en_token2id["<eos>"]:
+        if next_token == sp_en.eos_id():
             break
     return sp_en.decode_ids(generated[1:-1])
 
@@ -269,13 +289,12 @@ class BeamNode:
 
 def beam_search_translate(src_sentence, beam_width=5, max_len=50):
     tokens = sp_ja.encode_as_ids(src_sentence)
-    ids = [ja_token2id.get(t, ja_token2id['<unk>']) for t in tokens]
-    src = torch.tensor([[ja_token2id['<sos>']] + ids + [ja_token2id['<eos>']]], device=device)
-    src_padding_mask = (src == ja_token2id['<pad>'])
+    src = torch.tensor([[sp_ja.bos_id()] + tokens + [sp_ja.eos_id()]], device=device)
+    src_padding_mask = (src == sp_ja.pad_id())
 
     # ビームノードの初期化
-    beams = [BeamNode([en_token2id['<sos>']], 0.0)]
-    completed=[BeamNode([en_token2id['<sos>']], 0.0)]
+    beams = [BeamNode(sp_en.bos_id(), 0.0)]
+    completed=[BeamNode(sp_en.bos_id(), 0.0)]
 
     # ビームサーチのメインループ
     for _ in range(max_len):
@@ -291,11 +310,11 @@ def beam_search_translate(src_sentence, beam_width=5, max_len=50):
                     tgt_input,
                     tgt_mask=tgt_mask,
                     src_padding_mask=src_padding_mask,
-                    tgt_padding_mask=(tgt_input==en_token2id["<pad>"]),
+                    tgt_padding_mask=(tgt_input==sp_en.pad_id()),
                     memory_key_padding_mask=src_padding_mask
                 )
             # 出力の最後のトークンの分布
-            log_probs = F.log_softmax(out, dim=-1)
+            log_probs = F.log_softmax(out[:, -1, :], dim=-1)
             # 上位k個の候補を選ぶ
             topk_log_probs, topk_indices = log_probs.topk(beam_width)
 
@@ -306,13 +325,13 @@ def beam_search_translate(src_sentence, beam_width=5, max_len=50):
                 new_seq = beam.seq + [idx.item()]
                 new_logprob = beam.logprob + log_prob.item()
                 # <eos>トークンが生成された場合は完了候補として別保存
-                if idx.item() == en_token2id['<eos>']:
+                if idx.item() == sp_en.eos_id():
                     completed.append(BeamNode(new_seq, new_logprob))
                 new_beams.append(BeamNode(new_seq, new_logprob))
 
         # 上位k個を再選択し、次の候補にする
         beams = heapq.nlargest(beam_width, new_beams, key=lambda x: x.logprob)
-        if all(beam.seq[-1] == en_token2id['<eos>'] for beam in beams):
+        if all(beam.seq[-1] == sp_en.eos_id()for beam in beams):
             break
 
     # 最も確率の高い完了候補orビーム候補を選択
@@ -323,9 +342,9 @@ def beam_search_translate(src_sentence, beam_width=5, max_len=50):
     return ' '.join(sp_en.decode_ids(best.seq[1:-1]))  # remove <sos> and <eos>
 
 # 開発データ読み込み
-with open("./kftt-data-1.0/data/orig/kyoto-dev.ja") as f:
+with open("./kftt-data-1.0/data/orig/kyoto-dev.ja","r",encoding="utf-8") as f:
     dev_ja = [line.strip() for line in f]
-with open("./kftt-data-1.0/data/orig/kyoto-dev.en") as f:
+with open("./kftt-data-1.0/data/orig/kyoto-dev.en","r",encoding="utf-8") as f:
     dev_en = [line.strip() for line in f]
 
 beam_widths=list(range(1, 101,10))
