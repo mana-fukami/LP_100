@@ -1,0 +1,20 @@
+<!-- templates/index.html -->
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <title>翻訳デモシステム</title>
+</head>
+<body>
+    <h2>日本語から英語への翻訳</h2>
+    <form method="POST">
+        <textarea name="input_text" rows="4" cols="50" placeholder="日本語文を入力してください..."></textarea><br>
+        <input type="submit" value="翻訳">
+    </form>
+
+    {% if translation %}
+        <h3>翻訳結果:</h3>
+        <p>{{ translation }}</p>
+    {% endif %}
+</body>
+</html>

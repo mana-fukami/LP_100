@@ -7,7 +7,10 @@
     Optimizer (Adam, AdamW, RAdamなどAdam系をいくつか)
 最終的にBLUEスコアは10以上になることを確認すること
 """
+<<<<<<< HEAD
+=======
 import wandb
+>>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset,DataLoader
@@ -16,7 +19,11 @@ from collections import Counter
 from tqdm import tqdm
 import math
 import os
+<<<<<<< HEAD
+import sacrebleu
+=======
 from nltk.translate.bleu_score import sentence_bleu
+>>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -193,7 +200,11 @@ def calculate_bleu_score(model, data_loader, ja_id2token, en_id2token, device):
             for pred, target in zip(output, tgt_output):
                 pred_tokens = [en_id2token[idx.item()] for idx in pred if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
                 target_tokens = [en_id2token[idx.item()] for idx in target if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
+<<<<<<< HEAD
+                total_bleu += sacrebleu.corpus_bleu([target_tokens], pred_tokens)
+=======
                 total_bleu += sentence_bleu([target_tokens], pred_tokens)
+>>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
 
     return total_bleu / len(data_loader)
 
@@ -213,6 +224,12 @@ model = TransformerNMT(
 pad_id = en_token2id['<pad>']
 criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
 
+<<<<<<< HEAD
+epochs=10
+def train_roop(train_loader,optimizer):
+    model.train()
+    for epoch in range(epochs):
+=======
 # Wndbのログイン
 key=open("AllKeys/wandb.txt").readline()
 wandb.login(key=key)
@@ -226,6 +243,7 @@ wandb.config.epochs=20
 def train_roop(train_loader,optimizer):
     model.train()
     for epoch in range(2,wandb.config.epochs):
+>>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
         model.train()
         total_loss = 0
         

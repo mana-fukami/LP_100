@@ -1,5 +1,5 @@
 nlp_env/
-allKeys/
+AllKeys/
 wordsim353/
 SST-2/
 GoogleNews-vectors-negative300.bin
@@ -12,9 +12,16 @@ myenv2/
 results/
 kftt-data-1.0/
 split/
+<<<<<<< HEAD
 wandb/
 results_maxpool/
 *.pkl
 *.pt
 *.model
 *.vocab
+=======
+results_maxpool/
+*.pkl
+*.pt
+*.whl
+>>>>>>> 40fc88468a3e5ae48941a43f85f66700869bb185

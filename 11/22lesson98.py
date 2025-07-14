@@ -11,17 +11,32 @@ from tqdm import tqdm
 import math
 import os
 import MeCab
+<<<<<<< HEAD
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+=======
 os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+>>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
 # GPUに移動する
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
 # データの準備をする
 # -ファイルを開く
+<<<<<<< HEAD
+en_ja_file=open("./split/train","r",encoding="utf-8")
+en_ja_lines=en_ja_file.readlines()
+en_lines=[]
+ja_lines=[]
+for line in en_ja_lines:
+    en_ja=line.strip().split("\t")
+    en_lines.append(en_ja[0])
+    ja_lines.append(en_ja[1])
+=======
 en_file=open("./kftt-data-1.0/data/tok/kyoto-train.en","r",encoding="utf-8")
 en_lines=en_file.readlines()
 ja_file=open("./kftt-data-1.0/data/tok/kyoto-train.ja","r",encoding="utf-8")
 ja_lines=ja_file.readlines()
+>>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
 
 # -トークン列のリストを作る
 tagger=MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir")
