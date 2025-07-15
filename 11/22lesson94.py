@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import heapq
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 # GPUに移動する
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
@@ -78,8 +78,9 @@ model = TransformerNMT(
     nhead=8,
     num_layers=6,
     dim_ff=2048
-).to(device)
+)
 model.load_state_dict(torch.load("transformer_nmt.pt"))
+model.to(device)
 model.eval()
 
 # マスク生成
@@ -106,36 +107,49 @@ def beam_search_translate(src_sentence, beam_width=5, max_len=50):
 
     # ビームノードの初期化
     beams = [BeamNode([en_token2id['<sos>']], 0.0)]
-    completed=[BeamNode([en_token2id['<sos>']], 0.0)]
+    completed=[]
 
     # ビームサーチのメインループ
     for _ in range(max_len):
         new_beams = []
         # 各候補について次の単語を予測する
-        for beam in beams:
-            tgt_input = torch.tensor([beam.seq], device=device)
-            tgt_mask = generate_square_subsequent_mask(len(beam.seq)).to(device)
-            # Transformerに現在のsrcとtgt_inputを入力
-            with torch.no_grad():
-                out = model(
-                    src,
-                    tgt_input,
-                    tgt_mask=tgt_mask,
-                    src_padding_mask=src_padding_mask,
-                    tgt_padding_mask=(tgt_input==en_token2id["<pad>"]),
-                    memory_key_padding_mask=src_padding_mask
-                )
-            # 出力の最後のトークンの分布
-            log_probs = F.log_softmax(out[:,-1,:], dim=-1)
-            # 上位k個の候補を選ぶ
-            topk_log_probs, topk_indices = log_probs.topk(beam_width)
+        # バッチ化を行い、処理の高速化を図る
+        beam_seqs = [torch.tensor(beam.seq, dtype=torch.long) for beam in beams]
+        beam_lengths = [len(seq) for seq in beam_seqs]
+        max_len_beam = max(beam_lengths)
+        # padしてtensor化
+        tgt_input_batch = torch.full((len(beams), max_len_beam), fill_value=en_token2id["<pad>"], dtype=torch.long)
+        for i, seq in enumerate(beam_seqs):
+            tgt_input_batch[i, :len(seq)] = seq
+        tgt_input_batch = tgt_input_batch.to(device)
+        # tgt_mask（同じ長さのマスクを使う）
+        tgt_mask = generate_square_subsequent_mask(max_len_beam).to(device)
 
-            # 新しいビームノードを生成
-            for log_prob, idx in zip(topk_log_probs[0], topk_indices[0]):
+        # srcを複製（同じ入力文をbeam数分）
+        src_batch = src.repeat(len(beams), 1)
+        src_padding_mask_batch = src_padding_mask.repeat(len(beams), 1)
+        # Transformerに現在のsrcとtgt_inputを入力
+        with torch.no_grad():
+            out = model(
+                src_batch,
+                tgt_input_batch,
+                tgt_mask=tgt_mask,
+                src_padding_mask=src_padding_mask_batch,
+                tgt_padding_mask=(tgt_input_batch==en_token2id["<pad>"]),
+                memory_key_padding_mask=src_padding_mask_batch
+            )
+        # 出力の最後のトークンの分布
+        log_probs = F.log_softmax(out[:,-1,:], dim=-1)
+        # 上位k個の候補を選ぶ
+        topk_log_probs, topk_indices = log_probs.topk(beam_width)
+
+        # 新しいビームノードを生成
+        new_beams = []
+        for i, beam in enumerate(beams):
+            for log_prob, idx in zip(topk_log_probs[i], topk_indices[i]):
                 new_seq = beam.seq + [idx.item()]
                 new_logprob = beam.logprob + log_prob.item()
-                # <eos>トークンが生成された場合は完了候補として別保存
-                if idx.item() == en_token2id['<eos>']:
+                if idx.item() == en_token2id["<eos>"]:
                     completed.append(BeamNode(new_seq, new_logprob))
                 new_beams.append(BeamNode(new_seq, new_logprob))
 
@@ -179,3 +193,6 @@ plt.grid(True)
 #plt.show()
 plt.savefig('beam_width_vs_bleu.png', dpi=300, bbox_inches='tight')
 plt.close()
+"""
+実行結果はpngファイルに保存
+"""
