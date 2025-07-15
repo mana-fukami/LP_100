@@ -12,9 +12,22 @@ myenv2/
 results/
 kftt-data-1.0/
 split/
+<<<<<<< HEAD
+wandb/
+results_maxpool/
+*.pkl
+*.pt
+<<<<<<< HEAD
+*.whl
+*.model
+*.vocab
+=======
+*.model
+*.vocab
+=======
 results_maxpool/
 *.pkl
 *.pt
 *.whl
-*.model
-*.vocab
+>>>>>>> 40fc88468a3e5ae48941a43f85f66700869bb185
+>>>>>>> 40fcba5dac430b1b88d48fd0d6e75b58758e6d96
