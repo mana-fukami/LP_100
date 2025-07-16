@@ -18,3 +18,5 @@ translator_app/
 実行方法
 cd translator_app
 python app.py
+
+GPUにAPIを飛ばすことで自分のPCからモデルファイルを呼び出すことができる
