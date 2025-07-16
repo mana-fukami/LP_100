@@ -11,18 +11,14 @@ from tqdm import tqdm
 import math
 import os
 import MeCab
-<<<<<<< HEAD
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-=======
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
->>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
+import sacrebleu
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 # GPUに移動する
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
 # データの準備をする
 # -ファイルを開く
-<<<<<<< HEAD
 en_ja_file=open("./split/train","r",encoding="utf-8")
 en_ja_lines=en_ja_file.readlines()
 en_lines=[]
@@ -31,12 +27,6 @@ for line in en_ja_lines:
     en_ja=line.strip().split("\t")
     en_lines.append(en_ja[0])
     ja_lines.append(en_ja[1])
-=======
-en_file=open("./kftt-data-1.0/data/tok/kyoto-train.en","r",encoding="utf-8")
-en_lines=en_file.readlines()
-ja_file=open("./kftt-data-1.0/data/tok/kyoto-train.ja","r",encoding="utf-8")
-ja_lines=ja_file.readlines()
->>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
 
 # -トークン列のリストを作る
 tagger=MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir")
@@ -197,7 +187,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=
 pad_id = en_token2id['<pad>']
 criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
 
-num_epochs = 20
+num_epochs = 10
 for epoch in range(num_epochs):
     model.train()
     total_loss = 0
@@ -242,3 +232,49 @@ for epoch in range(num_epochs):
 
 # モデルと語彙の保存(次で使えるように)
 torch.save(model.state_dict(), "add_train_transformer_nmt.pt")
+
+model.eval()
+
+# テストデータ読み込み
+with open("./kftt-data-1.0/data/tok/kyoto-test.ja") as f:
+    test_ja = [line.split(" ") for line in f]
+with open("./kftt-data-1.0/data/tok/kyoto-test.en") as f:
+    test_en = [line for line in f]
+
+# 翻訳関数
+def translate(tokens, max_len=50):
+    ids = [ja_token2id.get(tok, ja_token2id["<unk>"]) for tok in tokens]
+    src = torch.tensor([[ja_token2id["<sos>"]] + ids + [ja_token2id["<eos>"]]], device=device)
+    src_padding_mask = (src == ja_token2id["<pad>"])
+    generated = [en_token2id["<sos>"]]
+    for _ in range(max_len):
+        tgt_input = torch.tensor([generated], device=device)
+        tgt_mask = torch.triu(torch.ones(tgt_input.size(1), tgt_input.size(1), device=device) == 1).transpose(0, 1)
+        tgt_mask = tgt_mask.float().masked_fill(tgt_mask == 0, float('-inf')).masked_fill(tgt_mask == 1, 0.0)
+        with torch.no_grad():
+            out = model(
+                src,
+                tgt_input,
+                tgt_mask=tgt_mask,
+                src_padding_mask=src_padding_mask,
+                tgt_padding_mask=(tgt_input==en_token2id["<pad>"]),
+                memory_key_padding_mask=src_padding_mask
+            )
+        next_token = out[0, -1].argmax(-1).item()
+        generated.append(next_token)
+        if next_token == en_token2id["<eos>"]:
+            break
+    return [en_id2token[idx] for idx in generated[1:-1]]
+
+# BLEU計算
+hypotheses = []
+for tokens in tqdm(test_ja):
+    pred_tokens = translate(tokens)
+    hypotheses.append(" ".join(pred_tokens))
+
+# sacreBLEU
+bleu = sacrebleu.corpus_bleu(hypotheses, [test_en])
+print(f"BLEU: {bleu.score:.2f}")
+"""
+BLEU: 0.08
+"""
