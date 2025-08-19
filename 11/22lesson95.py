@@ -177,7 +177,7 @@ model = TransformerNMT(
     num_layers=6,
     dim_ff=2048
 ).to(device)
-#model = nn.DataParallel(model)  # DataParallelでラップ
+model = nn.DataParallel(model)  # DataParallelでラップ
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
 pad_id = sp_en.pad_id()
 criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
