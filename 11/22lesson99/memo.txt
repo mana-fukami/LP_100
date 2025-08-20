@@ -16,7 +16,7 @@ translator_app/
 └── model_def.py        # Transformerと前処理関数
 
 実行方法
-cd translator_app
+cd 11/22lesson99
 python app.py
 
 GPUにAPIを飛ばすことで自分のPCからモデルファイルを呼び出すことができる

@@ -7,10 +7,7 @@
     Optimizer (Adam, AdamW, RAdamなどAdam系をいくつか)
 最終的にBLUEスコアは10以上になることを確認すること
 """
-<<<<<<< HEAD
-=======
-import wandb
->>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
+import optuna
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset,DataLoader
@@ -19,16 +16,9 @@ from collections import Counter
 from tqdm import tqdm
 import math
 import os
-<<<<<<< HEAD
 import sacrebleu
-=======
-from nltk.translate.bleu_score import sentence_bleu
->>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 # GPUに移動する
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
@@ -200,11 +190,7 @@ def calculate_bleu_score(model, data_loader, ja_id2token, en_id2token, device):
             for pred, target in zip(output, tgt_output):
                 pred_tokens = [en_id2token[idx.item()] for idx in pred if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
                 target_tokens = [en_id2token[idx.item()] for idx in target if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-<<<<<<< HEAD
                 total_bleu += sacrebleu.corpus_bleu([target_tokens], pred_tokens)
-=======
-                total_bleu += sentence_bleu([target_tokens], pred_tokens)
->>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
 
     return total_bleu / len(data_loader)
 
@@ -212,43 +198,56 @@ def calculate_bleu_score(model, data_loader, ja_id2token, en_id2token, device):
 src_vocab_size = len(ja_token2id)
 tgt_vocab_size = len(en_token2id)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = TransformerNMT(
-    src_vocab_size,
-    tgt_vocab_size,
-    d_model=512,
-    nhead=8,
-    num_layers=6,
-    dim_ff=2048
-).to(device)
-#model = nn.DataParallel(model)  # DataParallelでラップ
 pad_id = en_token2id['<pad>']
-criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
+criterion = nn.CrossEntropyLoss(ignore_index=pad_id)     
 
-<<<<<<< HEAD
-epochs=10
-def train_roop(train_loader,optimizer):
-    model.train()
+def objective(trial):
+    # 試したいパラメータの候補をOptunaに伝える
+    batch_size = trial.suggest_categorical('batch_size', [32, 64])
+    lr = trial.suggest_categorical('learning_rate', [1e-3, 1e-4, 1e-5])
+    optimizer_name = trial.suggest_categorical('optimizer', ['Adam', 'AdamW'])
+
+    # --- 1回の試行（学習＋評価）の実行 ---
+    # ハイパーパラメータに基づいてDataLoaderとOptimizerをセットアップ
+    train_dataset = TranslationDataset(ja_ids, en_ids)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=Collate, num_workers=4)
+    
+    # モデルの初期化（重要：毎試行でモデルの重みをリセットする）
+    model = TransformerNMT(
+        src_vocab_size,
+        tgt_vocab_size,
+        d_model=512,
+        nhead=8,
+        num_layers=6,
+        dim_ff=2048
+    ).to(device)
+    model = nn.DataParallel(model)  # DataParallelでラップ
+    
+    optimizer = get_optimizer(model, optimizer_name, lr) # get_optimizerを少し変更
+
+    # 学習の実行
+    print(f"Trial {trial.number}: batch_size={batch_size}, lr={lr}, optimizer={optimizer_name}")
+    train_roop(model, train_loader, optimizer, criterion) # train_roopを少し変更
+
+    # 評価の実行
+    bleu_score = calculate_bleu_score(model, train_loader, ja_id2token, en_id2token, device)
+    
+    # Optunaに返す評価指標 (今回はBLEUスコアを最大化する)
+    return bleu_score
+
+# get_optimizer と train_roop をモデルを受け取るように少し変更
+def get_optimizer(model, optimizer_name, learning_rate):
+    if optimizer_name == 'Adam':
+        return torch.optim.Adam(model.parameters(), lr=learning_rate)
+    elif optimizer_name == 'AdamW':
+        return torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+def train_roop(model, train_loader, optimizer, criterion):
+    # epochsの数を減らして1回の試行を短くする
+    epochs = 3 # 例えば3エポック
     for epoch in range(epochs):
-=======
-# Wndbのログイン
-key=open("AllKeys/wandb.txt").readline()
-wandb.login(key=key)
-
-# Wndbの初期化
-wandb.init(project="22lesson97")
-
-# ハイパーパラメータの設定
-wandb.config.epochs=20
-
-def train_roop(train_loader,optimizer):
-    model.train()
-    for epoch in range(2,wandb.config.epochs):
->>>>>>> bf4cb87d849b5ce0466928ebd9c9f3c86a5d0ead
         model.train()
-        total_loss = 0
-        
-        # tqdmで進捗バーを作成
-        for src_batch, tgt_batch in tqdm(train_loader):
+        for src_batch, tgt_batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
             src_batch = src_batch.to(device)
             tgt_batch = tgt_batch.to(device)
             
@@ -277,49 +276,23 @@ def train_roop(train_loader,optimizer):
             
             loss = criterion(output, tgt_output)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
-            
-            total_loss += loss.item()
+            optimizer.zero_grad()
 
-batch_size=[32,64]
-learning_rates = [1e-3, 1e-4, 1e-5]
-optimizers = ['Adam', 'AdamW', 'RAdam']
+# --- 3. studyの作成と実行 ---
+if __name__ == '__main__':
+    # BLEUスコアを最大化する(direction="maximize") studyを作成
+    study = optuna.create_study(direction="maximize")
+    
+    # 20回試行する
+    study.optimize(objective, n_trials=20)
 
-def get_optimizer(optimizer_name, learning_rate):
-    if optimizer_name == 'Adam':
-        return torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.98), eps=1e-9)
-    elif optimizer_name == 'AdamW':
-        return torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(0.9, 0.98), eps=1e-9)
-    elif optimizer_name == 'RAdam':
-        return torch.optim.RAdam(model.parameters(), lr=learning_rate, betas=(0.9, 0.98), eps=1e-9)
-    else:
-        raise ValueError(f"Unknown optimizer: {optimizer_name}")
+    # --- 結果の表示 ---
+    print("Number of finished trials: ", len(study.trials))
+    print("Best trial:")
+    trial = study.best_trial
 
-result_df = pd.DataFrame(columns=['batch_size', 'learning_rate', 'optimizer', 'bleu_score'])
-for batch in batch_size:
-    train_dataset=TranslationDataset(ja_ids,en_ids)
-    train_loader=DataLoader(train_dataset,batch_size=batch,shuffle=True,collate_fn=Collate,num_workers=4)
-    for lr in learning_rates:
-        for opt in optimizers:
-            optimizer = get_optimizer(opt,lr)
-            train_roop(train_loader=train_loader,optimizer=optimizer)
-            blue_score= calculate_bleu_score(model, train_loader, ja_id2token, en_id2token, device)
-            result_df["batch_size"]=batch
-            result_df["learning_rate"]=lr
-            result_df["optimizer"]=opt
-            result_df["bleu_score"]=blue_score
-            # 学習率を文字列にして見やすくする
-            result_df["lr_str"] = result_df["lr"].apply(lambda x: f"{x:.0e}")
-
-# 結果のヒートマップ
-g = sns.FacetGrid(result_df, col="optimizer", height=4)
-g.map_dataframe(
-    lambda data, color: sns.heatmap(
-        data.pivot("batch_size", "lr_str", "bleu"),
-        annot=True, fmt=".2f", cmap="viridis", cbar=False
-    )
-)
-plt.suptitle("BLEUスコア比較（各オプティマイザ）", y=1.05)
-plt.savefig('hyper_tuning.png', dpi=300, bbox_inches='tight')
-plt.close()
+    print("  Value (BLEU Score): ", trial.value)
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print(f"    {key}: {value}")

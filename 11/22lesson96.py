@@ -15,9 +15,9 @@ from collections import Counter
 from tqdm import tqdm
 import math
 import os
-from nltk.translate.bleu_score import sentence_bleu
+import sacrebleu
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 # GPUに移動する
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
@@ -192,7 +192,7 @@ def calculate_bleu_score(model, data_loader, ja_id2token, en_id2token, device):
             for pred, target in zip(output, tgt_output):
                 pred_tokens = [en_id2token[idx.item()] for idx in pred if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
                 target_tokens = [en_id2token[idx.item()] for idx in target if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-                total_bleu += sentence_bleu([target_tokens], pred_tokens)
+                total_bleu += sacrebleu.corpus_bleu(pred_tokens, [target_tokens])
 
     return total_bleu / len(data_loader)
 
@@ -208,13 +208,13 @@ model = TransformerNMT(
     num_layers=6,
     dim_ff=2048
 ).to(device)
-#model = nn.DataParallel(model)  # DataParallelでラップ
+model = nn.DataParallel(model)  # DataParallelでラップ
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
 pad_id = en_token2id['<pad>']
 criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
 
 # Wndbのログイン
-key=open("AllKeys/wandb.txt").readline()
+key=open("AllKeys/wandb").readline()
 wandb.login(key=key)
 
 # Wndbの初期化

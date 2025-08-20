@@ -2,13 +2,13 @@
 import torch
 import torch.nn as nn
 import pickle
-import math
 import MeCab
-# GPU移動
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using {device}")
 
-# Transformerモデルの定義
+# GPUが利用可能か確認し、デバイスを設定します
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+# --- Transformerモデルの定義 (この部分は変更ありません) ---
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=5000):
         super().__init__()
@@ -51,17 +51,31 @@ class TransformerNMT(nn.Module):
         )
         return self.output_layer(output.transpose(0,1))
 
-# モデルと辞書の読み込み
+# --- 修正部分 ---
+# モデル、辞書、MeCab Taggerを一度に読み込む関数
 def load_model_and_dict():
+    # MeCab Taggerをここで一度だけ初期化します
+    # 注意: この辞書のパスはあなたの環境に合わせてください
+    try:
+        tagger = MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir")
+    except RuntimeError as e:
+        print(f"Error initializing MeCab Tagger: {e}")
+        print("Please check the dictionary path in model_def.py")
+        # MeCabの初期化に失敗した場合は、プログラムを終了させます
+        raise
+
+    # 辞書ファイルを読み込みます
     with open("model/ja_token2id.pkl", "rb") as f:
         ja_token2id = pickle.load(f)
     with open("model/en_token2id.pkl", "rb") as f:
         en_token2id = pickle.load(f)
     with open("model/en_id2token.pkl", "rb") as f:
         en_id2token = pickle.load(f)
+    
     src_vocab_size = len(ja_token2id)
     tgt_vocab_size = len(en_token2id)
 
+    # モデルのインスタンスを作成します
     model = TransformerNMT(
         src_vocab_size,
         tgt_vocab_size,
@@ -70,35 +84,49 @@ def load_model_and_dict():
         num_layers=6,
         dim_ff=2048
     ).to(device)
-    model.load_state_dict(torch.load("model/model.pt", map_location="cpu"))
-    model.eval()
+    
+    # 学習済みモデルの重みを読み込みます
+    model.load_state_dict(torch.load("model/model.pt", map_location=device))
+    model.eval() # モデルを推論モードに設定します
 
-    return model, ja_token2id, en_token2id, en_id2token
+    # 初期化したオブジェクトを全て返します
+    return model, ja_token2id, en_token2id, en_id2token, tagger
 
-# 翻訳処理
-def translate(model, ja_token2id, en_token2id, en_id2token, sentence, max_len=50):
-    # トークナイズする
-    tagger=MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir")
-    node=tagger.parseToNode(sentence.strip())
+# 翻訳処理を行う関数
+def translate(model, ja_token2id, en_token2id, en_id2token, tagger, sentence, max_len=50):
+    # MeCabの初期化処理を削除し、引数で受け取ったtaggerを使用します
+    node = tagger.parseToNode(sentence.strip())
     tokens = []
     while node:
-        if node.surface != "":
+        if node.surface:
             tokens.append(node.surface)
         node = node.next
-    src = torch.tensor([[ja_token2id.get("<sos>")] + [ja_token2id.get(t, ja_token2id["<unk>"]) for t in tokens] + [ja_token2id.get("<eos>")]])
-    src_mask = (src == ja_token2id["<pad>"])
-    generated = [en_token2id["<sos>"]]
+    
+    # トークンをIDに変換し、PyTorchのテンソルに変換します
+    src = torch.tensor([[ja_token2id["<sos>"]] + [ja_token2id.get(t, ja_token2id["<unk>"]) for t in tokens] + [ja_token2id["<eos>"]]], device=device)
+    src_padding_mask = (src == ja_token2id["<pad>"]).to(device)
+    
+    generated_ids = [en_token2id["<sos>"]]
 
-    for _ in range(max_len):
-        tgt_input = torch.tensor([generated])
-        tgt_len = tgt_input.size(1)
-        tgt_mask = torch.triu(torch.ones(tgt_len, tgt_len) == 1).transpose(0, 1).float()
-        tgt_mask = tgt_mask.masked_fill(tgt_mask == 0, float('-inf')).masked_fill(tgt_mask == 1, float(0.0))
+    model.eval() # 推論モードであることを確認
+    with torch.no_grad(): # 勾配計算を無効化してメモリ効率を上げます
+        for _ in range(max_len):
+            tgt_input = torch.tensor([generated_ids], device=device)
+            tgt_len = tgt_input.size(1)
+            # Decoderへの入力マスクを作成します
+            tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_len).to(device)
 
-        out = model(src, tgt_input, tgt_mask=tgt_mask, src_padding_mask=src_mask, memory_key_padding_mask=src_mask)
-        next_token = out[0, -1].argmax(-1).item()
-        if next_token == en_token2id["<eos>"]:
-            break
-        generated.append(next_token)
+            # モデルで予測を実行します
+            output = model(src, tgt_input, tgt_mask=tgt_mask, src_padding_mask=src_padding_mask)
+            
+            # 最後の単語の予測確率が最も高いものを次の単語とします
+            next_token_id = output[0, -1].argmax(-1).item()
+            
+            # 終了トークンが出たら翻訳を終了します
+            if next_token_id == en_token2id["<eos>"]:
+                break
+            
+            generated_ids.append(next_token_id)
 
-    return " ".join([en_id2token[i] for i in generated[1:]])
+    # IDのリストを単語の文字列に変換します
+    return " ".join([en_id2token[i] for i in generated_ids[1:]])
