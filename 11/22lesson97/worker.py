@@ -86,6 +86,7 @@ def train_loop(rank, model, train_loader, optimizer, criterion, epochs, ja_token
     scaler = GradScaler()
 
     for epoch in range(epochs):
+        if rank==0: print("Epoch: ",epoch)
         # DistributedSamplerを使う場合、各エポックでset_epochを呼び出す必要がある
         train_loader.sampler.set_epoch(epoch)
         # tqdmをマスタープロセス(rank 0)でのみ表示する

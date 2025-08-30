@@ -33,17 +33,11 @@ def objective(trial):
     print(f"\n--- Starting Trial {trial.number} with command: {' '.join(command)} ---")
 
     # サブプロセスを実行
-    # --- 環境変数を準備 ---
-    # 現在の環境変数をコピー
-    env = os.environ.copy()
-    # ★ torchrunに詳細なエラーを出力させるための環境変数を設定
-    env['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
     process=subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True, encoding='utf-8', bufsize=1,
-        env=env
+        text=True, encoding='utf-8', bufsize=1
     )
 
     stdout_output = ""
