@@ -1,4 +1,3 @@
-import optuna
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -6,27 +5,13 @@ from torch.nn.utils.rnn import pad_sequence
 from collections import Counter
 from tqdm import tqdm
 import math
-import os
-import sacrebleu
-
-# DDP関連のライブラリ
 import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-# メモリ改善のためのライブラリ
+import argparse
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.checkpoint import checkpoint
-
-def setup(rank, world_size):
-    """DDPのためのプロセスグループを初期化"""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-def cleanup():
-    """プロセスグループを破棄"""
-    dist.destroy_process_group()
+import sacrebleu
 
 # データの準備
 # -トークン化されたファイルを開く
@@ -136,59 +121,6 @@ def generate_square_subsequent_mask(sz):
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
     return mask
 
-# BLEUスコア計算 (変更なし)
-def calculate_bleu_score(model, data_loader, device):
-    # DDPでラップされている場合、元のモデルにアクセスするために .module を使用
-    model_to_eval = model.module if isinstance(model, DDP) else model
-    model_to_eval.eval()
-    
-    refs = []
-    hyps = []
-
-    with torch.no_grad():
-        for src_batch, tgt_batch in data_loader:
-            src_batch = src_batch.to(device)
-            
-            # 貪欲法(Greedy Search)によるデコード
-            # <sos>トークンから開始
-            memory = model_to_eval.transformer.encoder(
-                model_to_eval.positional_encoding(model_to_eval.src_embedding(src_batch)).transpose(0,1),
-                src_key_padding_mask=(src_batch == ja_token2id['<pad>'])
-            )
-
-            batch_size = src_batch.size(0)
-            ys = torch.ones(batch_size, 1).fill_(en_token2id['<sos>']).long().to(device)
-            
-            for _ in range(100): # 最大生成長
-                tgt_mask = generate_square_subsequent_mask(ys.size(1)).to(device)
-                out = model_to_eval.transformer.decoder(
-                    model_to_eval.positional_encoding(model_to_eval.tgt_embedding(ys)).transpose(0,1), 
-                    memory, 
-                    tgt_mask=tgt_mask
-                )
-                out = out.transpose(0,1)
-                prob = model_to_eval.output_layer(out[:, -1])
-                _, next_word = torch.max(prob, dim=1)
-                next_word = next_word.unsqueeze(1)
-                ys = torch.cat([ys, next_word], dim=1)
-                if torch.all(next_word.squeeze() == en_token2id['<eos>']):
-                    break
-
-            # IDをトークンに変換
-            for i in range(ys.size(0)):
-                pred_ids = ys[i].cpu().numpy()
-                pred_tokens = [en_id2token[idx] for idx in pred_ids if idx not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-                hyps.append(" ".join(pred_tokens))
-
-            for i in range(tgt_batch.size(0)):
-                target_ids = tgt_batch[i].cpu().numpy()
-                target_tokens = [en_id2token[idx] for idx in target_ids if idx not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-                refs.append([" ".join(target_tokens)])
-    
-    # sacrebleuは参照訳をリストのリストとして受け取る
-    bleu = sacrebleu.corpus_bleu(hyps, refs, tokenize='none')
-    return bleu.score
-
 # 勾配蓄積+混合精度学習を適用
 def train_loop(rank, model, train_loader, optimizer, criterion, epochs):
     """1試行あたりの学習ループ (勾配蓄積を実装)"""
@@ -243,16 +175,73 @@ def train_loop(rank, model, train_loader, optimizer, criterion, epochs):
         scaler.update()
         optimizer.zero_grad()
 
-def worker(rank, world_size, params, result_queue):
-    """
-    各プロセスで実行される関数
-    rank: プロセスID (0がマスター)
-    world_size: 全プロセス数 (GPU数)
-    params: Optunaが提案したハイパーパラメータ
-    result_queue: マスタープロセスに結果を返すためのキュー
-    """
-    setup(rank, world_size)
+# BLEUスコア計算 (変更なし)
+def calculate_bleu_score(model, data_loader, device):
+    # DDPでラップされている場合、元のモデルにアクセスするために .module を使用
+    model_to_eval = model.module if isinstance(model, DDP) else model
+    model_to_eval.eval()
+    
+    refs = []
+    hyps = []
 
+    with torch.no_grad():
+        for src_batch, tgt_batch in data_loader:
+            src_batch = src_batch.to(device)
+            
+            # 貪欲法(Greedy Search)によるデコード
+            # <sos>トークンから開始
+            memory = model_to_eval.transformer.encoder(
+                model_to_eval.positional_encoding(model_to_eval.src_embedding(src_batch)).transpose(0,1),
+                src_key_padding_mask=(src_batch == ja_token2id['<pad>'])
+            )
+
+            batch_size = src_batch.size(0)
+            ys = torch.ones(batch_size, 1).fill_(en_token2id['<sos>']).long().to(device)
+            
+            for _ in range(100): # 最大生成長
+                tgt_mask = generate_square_subsequent_mask(ys.size(1)).to(device)
+                out = model_to_eval.transformer.decoder(
+                    model_to_eval.positional_encoding(model_to_eval.tgt_embedding(ys)).transpose(0,1), 
+                    memory, 
+                    tgt_mask=tgt_mask
+                )
+                out = out.transpose(0,1)
+                prob = model_to_eval.output_layer(out[:, -1])
+                _, next_word = torch.max(prob, dim=1)
+                next_word = next_word.unsqueeze(1)
+                ys = torch.cat([ys, next_word], dim=1)
+                if torch.all(next_word.squeeze() == en_token2id['<eos>']):
+                    break
+
+            # IDをトークンに変換
+            for i in range(ys.size(0)):
+                pred_ids = ys[i].cpu().numpy()
+                pred_tokens = [en_id2token[idx] for idx in pred_ids if idx not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
+                hyps.append(" ".join(pred_tokens))
+
+            for i in range(tgt_batch.size(0)):
+                target_ids = tgt_batch[i].cpu().numpy()
+                target_tokens = [en_id2token[idx] for idx in target_ids if idx not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
+                refs.append([" ".join(target_tokens)])
+    
+    # sacrebleuは参照訳をリストのリストとして受け取る
+    bleu = sacrebleu.corpus_bleu(hyps, refs, tokenize='none')
+    return bleu.score
+
+def main():
+    # コマンドライン引数の設定
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--lr', type=float, required=True)
+    parser.add_argument('--batch_size', type=int, required=True)
+    parser.add_srgumant('--optimizer', type=str, required=True)
+    args = parser.parse_args()
+
+    # DDpの初期化
+    dist.init_process_group("nccl")
+    rank = dist.get_rank()
+    device = torch.device(f"cuda:{rank}")
+
+    # モデルやパラメータの設定
     # データセットの準備
     train_dataset = TranslationDataset(ja_ids, en_ids)
     
@@ -262,7 +251,7 @@ def worker(rank, world_size, params, result_queue):
     # DataLoaderの作成
     # DDPの場合、shuffle=Falseにする (Samplerがシャッフルするため)
     train_loader = DataLoader(
-        train_dataset, batch_size=params['batch_size'], collate_fn=Collate,
+        train_dataset, batch_size=args.batch_size, collate_fn=Collate,
         sampler=train_sampler, pin_memory=True, num_workers=0
     )
 
@@ -276,16 +265,16 @@ def worker(rank, world_size, params, result_queue):
         nhead=8,
         num_layers=6,
         dim_ff=2048
-    ).to(rank)
+    ).to(device)
     # モデルをDDPでラップ
     model = DDP(model, device_ids=[rank])
-    
+
     # Optimizerの選択
-    if params['optimizer'] == 'Adam':
+    if args.optimizer == 'Adam':
         optimizer = torch.optim.Adam(model.parameters(), lr=params['learning_rate'])
-    elif params['optimizer'] == 'AdamW':
+    elif args.optimizer == 'AdamW':
         optimizer = torch.optim.AdamW(model.parameters(), lr=params['learning_rate'])
-    
+
     pad_id = en_token2id['<pad>']
     criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
     
@@ -298,52 +287,14 @@ def worker(rank, world_size, params, result_queue):
         # 評価用のデータローダ (Samplerなし)
         # サンプル数を減らして評価を高速化することも可能
         val_dataset = TranslationDataset(ja_ids[:500], en_ids[:500]) # 500文で評価
-        val_loader = DataLoader(val_dataset, batch_size=params['batch_size'], collate_fn=Collate)
+        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=Collate)
         
         bleu_score = calculate_bleu_score(model, val_loader, rank)
         print(f"Trial finished. BLEU Score: {bleu_score}")
-        # 結果をキューに入れてメインプロセスに渡す
-        result_queue.put(bleu_score)
+        # 結果を出力する（メインプロセスに引き渡す）
+        print(f"{bleu_score}")
 
-    cleanup()
+    dist.destroy_process_group()
 
-def objective(trial):
-    """Optunaが呼び出す目的関数"""
-    params = {
-        'batch_size': trial.suggest_categorical('batch_size', [4, 8]),
-        'learning_rate': trial.suggest_loguniform('learning_rate', 1e-6, 1e-3),
-        'optimizer': trial.suggest_categorical('optimizer', ['Adam', 'AdamW']), 
-    }
-    
-    world_size = torch.cuda.device_count()
-    # 結果をプロセス間で共有するためのキュー
-    result_queue = mp.Queue()
-    
-    print(f"\n--- Starting Trial {trial.number} with params: {params} ---")
-    
-    mp.spawn(worker,
-             args=(world_size, params, result_queue),
-             nprocs=world_size,
-             join=True)
-    
-    # キューから結果を取得
-    bleu_score = result_queue.get()
-
-    return bleu_score
-
-if __name__ == '__main__':
-    if not torch.cuda.is_available() or torch.cuda.device_count() <= 1:
-        print("This script requires multiple GPUs to run with DDP.")
-    else:
-        study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=20)
-
-        print("\n--- Optimization Finished ---")
-        print("Number of finished trials: ", len(study.trials))
-        
-        best_trial = study.best_trial
-        print("Best trial:")
-        print(f"  Value (BLEU Score): {best_trial.value:.4f}")
-        print("  Params: ")
-        for key, value in best_trial.params.items():
-            print(f"    {key}: {value}")
+if __name__=="__main__":
+    main()    

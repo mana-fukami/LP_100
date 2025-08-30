@@ -221,7 +221,7 @@ def calculate_bleu_score(model, data_loader, rank):
         
         # sacrebleuは参照訳をリストのリストとして受け取る [[ref1], [ref2], ...]
         bleu = sacrebleu.corpus_bleu(all_preds, [all_targets])
-        return bleu.
+        return bleu
     
     return 0.0 # 他のプロセスはダミー値を返す
 
@@ -257,8 +257,8 @@ def main_worker(rank, world_size):
             # Wndbのログイン
             key=open("AllKeys/wandb").readline()
             wandb.login(key=key)
-            except Exception as e:
-                print(f"Could not log in to WandB: {e}")
+        except Exception as e:
+            print(f"Could not log in to WandB: {e}")
         
         # 初期化
         wandb.init(project="22lesson96")
@@ -338,7 +338,7 @@ def main_worker(rank, world_size):
     cleanup()
 
 if __name__ == '__main__':
-    world_size = torch.cude.device_count()
+    world_size = torch.cuda.device_count()
     if world_size > 0:
         print(f"Found {world_size} GPUs. Spawning DDP processes.")
         # spawn を使って DDP プロセスを起動
