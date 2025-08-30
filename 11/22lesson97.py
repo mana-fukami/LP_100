@@ -1,16 +1,7 @@
-"""
-ニューラルネットワークのモデルや,そのハイパーパラメータを変更しつつ,開発データにおけるBLEUスコアが
-最大となるモデルとハイパーパラメータを求めよ．
-チューニングを行うハイパーパラメータは項目は以下とすること
-    バッチサイズ
-    学習率(1e-3~1e-6)
-    Optimizer (Adam, AdamW, RAdamなどAdam系をいくつか)
-最終的にBLUEスコアは10以上になることを確認すること
-"""
 import optuna
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset,DataLoader
+from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from collections import Counter
 from tqdm import tqdm
@@ -18,12 +9,26 @@ import math
 import os
 import sacrebleu
 
-#os.environ["CUDA_VISIBLE_DEVICES"] = "5"
-# GPUに移動する
-device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Using device:", device)
+# DDP関連のライブラリ
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+# メモリ改善のためのライブラリ
+from torch.cuda.amp import GradScaler, autocast
+from torch.utils.checkpoint import checkpoint
 
-# データの準備をする
+def setup(rank, world_size):
+    """DDPのためのプロセスグループを初期化"""
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+def cleanup():
+    """プロセスグループを破棄"""
+    dist.destroy_process_group()
+
+# データの準備
 # -トークン化されたファイルを開く
 en_file=open("./kftt-data-1.0/data/tok/kyoto-train.en","r",encoding="utf-8")
 en_lines=en_file.readlines()
@@ -47,16 +52,13 @@ for tokens in ja_tokenized:
     ja_counter.update(tokens)
 
 # -頻度の高い順に並べる
-max_vocab_size = 50000
+max_vocab_size = 25000
 en_vocab_list = ['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in en_counter.most_common(max_vocab_size)]
 ja_vocab_list=['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in ja_counter.most_common(max_vocab_size)]
-#print(f"vocab_size: {len(en_vocab_list)}")
 
 # -IDの辞書
 en_token2id = {token: idx for idx, token in enumerate(en_vocab_list)}
 ja_token2id = {token: idx for idx, token in enumerate(ja_vocab_list)}
-
-# -逆引き
 en_id2token = {idx: token for token, idx in en_token2id.items()}
 ja_id2token = {idx: token for token, idx in ja_token2id.items()}
 
@@ -73,22 +75,22 @@ for en in en_tokenized:
 # -データセット化
 class TranslationDataset(Dataset):
     def __init__(self, src_sequences, tgt_sequences):
-        self.src_sequences = src_sequences  # ja_ids
-        self.tgt_sequences = tgt_sequences  # en_ids
+        self.src_sequences = src_sequences
+        self.tgt_sequences = tgt_sequences
 
     def __len__(self):
         return len(self.src_sequences)
 
     def __getitem__(self, idx):
-        return torch.tensor(self.src_sequences[idx], dtype=torch.long),torch.tensor(self.tgt_sequences[idx], dtype=torch.long)
+        return torch.tensor(self.src_sequences[idx], dtype=torch.long), torch.tensor(self.tgt_sequences[idx], dtype=torch.long)
 
 def Collate(batch):
-    src_batch, tgt_batch = zip(*batch)  # バッチの中のサンプルを分ける
+    src_batch, tgt_batch = zip(*batch)
     src_batch = pad_sequence(src_batch, padding_value=ja_token2id['<pad>'], batch_first=True)
     tgt_batch = pad_sequence(tgt_batch, padding_value=en_token2id['<pad>'], batch_first=True)
     return src_batch, tgt_batch
 
-# 文の順序を保持するための位置エンコーディング
+# モデル定義 (元のコードと同じ)
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=5000):
         super().__init__()
@@ -97,122 +99,176 @@ class PositionalEncoding(nn.Module):
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)   # shape (1, max_len, d_model)
+        pe = pe.unsqueeze(0)
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        # x shape: (batch_size, seq_len, d_model)
         x = x + self.pe[:, :x.size(1)]
         return x
 
 class TransformerNMT(nn.Module):
     def __init__(self, src_vocab_size, tgt_vocab_size, d_model=512, nhead=8, num_layers=6, dim_ff=2048, dropout=0.1):
-        # d_model:埋め込み層の次元数, nhead:マルチヘッドアテンションのヘッド数
-        # num_layers:エンコーダ・デコーダの層の数, dim__ff:feed-forwardの中間層の次元数
         super().__init__()
-        # 日本語と単語のIDをベクトルに変化する
         self.src_embedding = nn.Embedding(src_vocab_size, d_model)
         self.tgt_embedding = nn.Embedding(tgt_vocab_size, d_model)
-        # Transformerは順序情報を持たないので、位置エンコーディングを行う
         self.positional_encoding = PositionalEncoding(d_model)
-        
         self.transformer = nn.Transformer(
-            d_model=d_model,
-            nhead=nhead,
-            num_encoder_layers=num_layers,
-            num_decoder_layers=num_layers,
-            dim_feedforward=dim_ff,
-            dropout=dropout
+            d_model=d_model, nhead=nhead, num_encoder_layers=num_layers,
+            num_decoder_layers=num_layers, dim_feedforward=dim_ff, dropout=dropout
         )
-        # d_model次元の特徴ベクトルをターゲット語彙数に変換する
         self.output_layer = nn.Linear(d_model, tgt_vocab_size)
     
     def forward(self, src, tgt, src_mask=None, tgt_mask=None, src_padding_mask=None, tgt_padding_mask=None, memory_key_padding_mask=None):
-        # Embedding + positional
-        # ID列をベクトルにし、位置エンコーディングを加える
         src_emb = self.positional_encoding(self.src_embedding(src))
         tgt_emb = self.positional_encoding(self.tgt_embedding(tgt))
-        
-        # transformer expects [seq_len, batch_size, d_model]
-        # Transformerに合わせてデータを整形する
         src_emb = src_emb.transpose(0, 1)
         tgt_emb = tgt_emb.transpose(0, 1)
-        
         output = self.transformer(
-            src_emb,
-            tgt_emb,
-            src_mask=src_mask,
-            tgt_mask=tgt_mask,
-            src_key_padding_mask=src_padding_mask,
-            tgt_key_padding_mask=tgt_padding_mask,
+            src_emb, tgt_emb, src_mask=src_mask, tgt_mask=tgt_mask,
+            src_key_padding_mask=src_padding_mask, tgt_key_padding_mask=tgt_padding_mask,
             memory_key_padding_mask=memory_key_padding_mask
         )
-        
-        # output: [seq_len, batch_size, d_model]
-        # Transformerの出力を元のデータに合わせる
-        output = output.transpose(0, 1)  # back to [batch_size, seq_len, d_model]
-        # 最後に線形層を通して語彙数に変換する
+        output = output.transpose(0, 1)
         return self.output_layer(output)
 
-# マスクの生成
 def generate_square_subsequent_mask(sz):
     mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
     return mask
 
-def calculate_bleu_score(model, data_loader, ja_id2token, en_id2token, device):
-    model.eval()
-    total_bleu = 0
+# BLEUスコア計算 (変更なし)
+def calculate_bleu_score(model, data_loader, device):
+    # DDPでラップされている場合、元のモデルにアクセスするために .module を使用
+    model_to_eval = model.module if isinstance(model, DDP) else model
+    model_to_eval.eval()
+    
+    refs = []
+    hyps = []
+
     with torch.no_grad():
         for src_batch, tgt_batch in data_loader:
             src_batch = src_batch.to(device)
-            tgt_batch = tgt_batch.to(device)
-
-            tgt_input = tgt_batch[:, :-1]  # decoder入力
-            tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
-
-            # 推論
-            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
-            src_pad_id = ja_token2id['<pad>']
-            tgt_pad_id = en_token2id['<pad>']
-
-            output = model(
-                src_batch,
-                tgt_input,
-                tgt_mask=tgt_mask,
-                src_padding_mask=(src_batch == src_pad_id),
-                tgt_padding_mask=(tgt_input == tgt_pad_id),
-                memory_key_padding_mask=(src_batch == src_pad_id)
+            
+            # 貪欲法(Greedy Search)によるデコード
+            # <sos>トークンから開始
+            memory = model_to_eval.transformer.encoder(
+                model_to_eval.positional_encoding(model_to_eval.src_embedding(src_batch)).transpose(0,1),
+                src_key_padding_mask=(src_batch == ja_token2id['<pad>'])
             )
 
-            # 出力をデコード
-            output = torch.argmax(output, dim=-1)  # [batch_size, tgt_len]
-            for pred, target in zip(output, tgt_output):
-                pred_tokens = [en_id2token[idx.item()] for idx in pred if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-                target_tokens = [en_id2token[idx.item()] for idx in target if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-                total_bleu += sacrebleu.corpus_bleu([target_tokens], pred_tokens)
+            batch_size = src_batch.size(0)
+            ys = torch.ones(batch_size, 1).fill_(en_token2id['<sos>']).long().to(device)
+            
+            for _ in range(100): # 最大生成長
+                tgt_mask = generate_square_subsequent_mask(ys.size(1)).to(device)
+                out = model_to_eval.transformer.decoder(
+                    model_to_eval.positional_encoding(model_to_eval.tgt_embedding(ys)).transpose(0,1), 
+                    memory, 
+                    tgt_mask=tgt_mask
+                )
+                out = out.transpose(0,1)
+                prob = model_to_eval.output_layer(out[:, -1])
+                _, next_word = torch.max(prob, dim=1)
+                next_word = next_word.unsqueeze(1)
+                ys = torch.cat([ys, next_word], dim=1)
+                if torch.all(next_word.squeeze() == en_token2id['<eos>']):
+                    break
 
-    return total_bleu / len(data_loader)
+            # IDをトークンに変換
+            for i in range(ys.size(0)):
+                pred_ids = ys[i].cpu().numpy()
+                pred_tokens = [en_id2token[idx] for idx in pred_ids if idx not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
+                hyps.append(" ".join(pred_tokens))
 
-# 学習ループ
-src_vocab_size = len(ja_token2id)
-tgt_vocab_size = len(en_token2id)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-pad_id = en_token2id['<pad>']
-criterion = nn.CrossEntropyLoss(ignore_index=pad_id)     
-
-def objective(trial):
-    # 試したいパラメータの候補をOptunaに伝える
-    batch_size = trial.suggest_categorical('batch_size', [32, 64])
-    lr = trial.suggest_categorical('learning_rate', [1e-3, 1e-4, 1e-5])
-    optimizer_name = trial.suggest_categorical('optimizer', ['Adam', 'AdamW'])
-
-    # --- 1回の試行（学習＋評価）の実行 ---
-    # ハイパーパラメータに基づいてDataLoaderとOptimizerをセットアップ
-    train_dataset = TranslationDataset(ja_ids, en_ids)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=Collate, num_workers=4)
+            for i in range(tgt_batch.size(0)):
+                target_ids = tgt_batch[i].cpu().numpy()
+                target_tokens = [en_id2token[idx] for idx in target_ids if idx not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
+                refs.append([" ".join(target_tokens)])
     
-    # モデルの初期化（重要：毎試行でモデルの重みをリセットする）
+    # sacrebleuは参照訳をリストのリストとして受け取る
+    bleu = sacrebleu.corpus_bleu(hyps, refs, tokenize='none')
+    return bleu.score
+
+# 勾配蓄積+混合精度学習を適用
+def train_loop(rank, model, train_loader, optimizer, criterion, epochs):
+    """1試行あたりの学習ループ (勾配蓄積を実装)"""
+    model.train()
+    accumulation_steps = 4  # 4ステップで1回パラメータを更新 (実質的なバッチサイズが4倍に)
+    scaler = GradScaler()
+
+    for epoch in range(epochs):
+        # DistributedSamplerを使う場合、各エポックでset_epochを呼び出す必要がある
+        train_loader.sampler.set_epoch(epoch)
+        # tqdmをマスタープロセス(rank 0)でのみ表示する
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", disable=(rank != 0))
+        
+        for i, (src_batch, tgt_batch) in enumerate(pbar):
+            src_batch = src_batch.to(rank)
+            tgt_batch = tgt_batch.to(rank)
+            
+            tgt_input = tgt_batch[:, :-1]
+            tgt_output = tgt_batch[:, 1:]
+
+            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(rank)
+            
+            src_pad_id = ja_token2id['<pad>']
+            tgt_pad_id = en_token2id['<pad>']
+            
+            with autocast():
+                output = model(
+                    src_batch, tgt_input,
+                    tgt_mask=tgt_mask,
+                    src_padding_mask=(src_batch == src_pad_id),
+                    tgt_padding_mask=(tgt_input == tgt_pad_id),
+                    memory_key_padding_mask=(src_batch == src_pad_id)
+                )
+                
+                output = output.reshape(-1, output.size(-1))
+                tgt_output = tgt_output.reshape(-1)
+                
+                loss = criterion(output, tgt_output)
+                loss = loss / accumulation_steps
+            scaler.scale(loss).backward()
+
+            if (i + 1) % accumulation_steps == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+            
+            if rank == 0:
+                pbar.set_postfix(loss=loss.item() * accumulation_steps)
+        
+        # エポックの最後に更新されなかった勾配を更新
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad()
+
+def worker(rank, world_size, params, result_queue):
+    """
+    各プロセスで実行される関数
+    rank: プロセスID (0がマスター)
+    world_size: 全プロセス数 (GPU数)
+    params: Optunaが提案したハイパーパラメータ
+    result_queue: マスタープロセスに結果を返すためのキュー
+    """
+    setup(rank, world_size)
+
+    # データセットの準備
+    train_dataset = TranslationDataset(ja_ids, en_ids)
+    
+    # DDPではDistributedSamplerを使用してデータを各プロセスに分割
+    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
+    
+    # DataLoaderの作成
+    # DDPの場合、shuffle=Falseにする (Samplerがシャッフルするため)
+    train_loader = DataLoader(
+        train_dataset, batch_size=params['batch_size'], collate_fn=Collate,
+        sampler=train_sampler, pin_memory=True, num_workers=0
+    )
+
+    # モデルの初期化
+    src_vocab_size = len(ja_token2id)
+    tgt_vocab_size = len(en_token2id)
     model = TransformerNMT(
         src_vocab_size,
         tgt_vocab_size,
@@ -220,79 +276,75 @@ def objective(trial):
         nhead=8,
         num_layers=6,
         dim_ff=2048
-    ).to(device)
-    model = nn.DataParallel(model)  # DataParallelでラップ
+    ).to(rank)
+    # モデルをDDPでラップ
+    model = DDP(model, device_ids=[rank])
     
-    optimizer = get_optimizer(model, optimizer_name, lr) # get_optimizerを少し変更
-
-    # 学習の実行
-    print(f"Trial {trial.number}: batch_size={batch_size}, lr={lr}, optimizer={optimizer_name}")
-    train_roop(model, train_loader, optimizer, criterion) # train_roopを少し変更
-
-    # 評価の実行
-    bleu_score = calculate_bleu_score(model, train_loader, ja_id2token, en_id2token, device)
+    # Optimizerの選択
+    if params['optimizer'] == 'Adam':
+        optimizer = torch.optim.Adam(model.parameters(), lr=params['learning_rate'])
+    elif params['optimizer'] == 'AdamW':
+        optimizer = torch.optim.AdamW(model.parameters(), lr=params['learning_rate'])
     
-    # Optunaに返す評価指標 (今回はBLEUスコアを最大化する)
+    pad_id = en_token2id['<pad>']
+    criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
+    
+    # 学習実行
+    epochs = 5  # 1回の試行でのエポック数 (適宜調整)
+    train_loop(rank, model, train_loader, optimizer, criterion, epochs)
+
+    # マスタープロセス(rank 0)のみで評価と結果報告を行う
+    if rank == 0:
+        # 評価用のデータローダ (Samplerなし)
+        # サンプル数を減らして評価を高速化することも可能
+        val_dataset = TranslationDataset(ja_ids[:500], en_ids[:500]) # 500文で評価
+        val_loader = DataLoader(val_dataset, batch_size=params['batch_size'], collate_fn=Collate)
+        
+        bleu_score = calculate_bleu_score(model, val_loader, rank)
+        print(f"Trial finished. BLEU Score: {bleu_score}")
+        # 結果をキューに入れてメインプロセスに渡す
+        result_queue.put(bleu_score)
+
+    cleanup()
+
+def objective(trial):
+    """Optunaが呼び出す目的関数"""
+    params = {
+        'batch_size': trial.suggest_categorical('batch_size', [4, 8]),
+        'learning_rate': trial.suggest_loguniform('learning_rate', 1e-6, 1e-3),
+        'optimizer': trial.suggest_categorical('optimizer', ['Adam', 'AdamW']), 
+    }
+    
+    world_size = torch.cuda.device_count()
+    # 結果をプロセス間で共有するためのキュー
+    result_queue = mp.Queue()
+    
+    print(f"\n--- Starting Trial {trial.number} with params: {params} ---")
+    
+    mp.spawn(worker,
+             args=(world_size, params, result_queue),
+             nprocs=world_size,
+             join=True)
+    
+    # キューから結果を取得
+    bleu_score = result_queue.get()
+
     return bleu_score
 
-# get_optimizer と train_roop をモデルを受け取るように少し変更
-def get_optimizer(model, optimizer_name, learning_rate):
-    if optimizer_name == 'Adam':
-        return torch.optim.Adam(model.parameters(), lr=learning_rate)
-    elif optimizer_name == 'AdamW':
-        return torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
-def train_roop(model, train_loader, optimizer, criterion):
-    # epochsの数を減らして1回の試行を短くする
-    epochs = 3 # 例えば3エポック
-    for epoch in range(epochs):
-        model.train()
-        for src_batch, tgt_batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-            src_batch = src_batch.to(device)
-            tgt_batch = tgt_batch.to(device)
-            
-            tgt_input = tgt_batch[:, :-1]  # decoder入力
-            tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
-
-            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
-            
-            src_pad_id = ja_token2id['<pad>']
-            tgt_pad_id = en_token2id['<pad>']
-            
-            optimizer.zero_grad()
-            
-            output = model(
-                src_batch,
-                tgt_input,
-                tgt_mask=tgt_mask,
-                src_padding_mask=(src_batch == src_pad_id),
-                tgt_padding_mask=(tgt_input == tgt_pad_id),
-                memory_key_padding_mask=(src_batch == src_pad_id)
-            )
-            
-            # 出力 shape [batch_size, tgt_len, vocab_size] → [batch_size * tgt_len, vocab_size]
-            output = output.reshape(-1, output.size(-1))
-            tgt_output = tgt_output.reshape(-1)
-            
-            loss = criterion(output, tgt_output)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-
-# --- 3. studyの作成と実行 ---
 if __name__ == '__main__':
-    # BLEUスコアを最大化する(direction="maximize") studyを作成
-    study = optuna.create_study(direction="maximize")
-    
-    # 20回試行する
-    study.optimize(objective, n_trials=20)
+    if not torch.cuda.is_available() or torch.cuda.device_count() <= 1:
+        print("This script requires multiple GPUs to run with DDP.")
+    else:
+        study = optuna.create_study(direction="maximize")
+        study.optimize(objective, n_trials=20)
 
-    # --- 結果の表示 ---
-    print("Number of finished trials: ", len(study.trials))
-    print("Best trial:")
-    trial = study.best_trial
-
-    print("  Value (BLEU Score): ", trial.value)
-    print("  Params: ")
-    for key, value in trial.params.items():
-        print(f"    {key}: {value}")
+        print("\n--- Optimization Finished ---")
+        print("Number of finished trials: ", len(study.trials))
+        
+        best_trial = study.best_trial
+        print("Best trial:")
+        print(f"  Value (BLEU Score): {best_trial.value:.4f}")
+        print("  Params: ")
+        for key, value in best_trial.params.items():
+            print(f"    {key}: {value}")

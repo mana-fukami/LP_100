@@ -17,10 +17,20 @@ import math
 import os
 import sacrebleu
 
-#os.environ["CUDA_VISIBLE_DEVICES"] = "5"
-# GPUに移動する
-device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Using device:", device)
+# DDPのライブラリ
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+
+# DDPの初期化とクリーンアップ
+def setup(rank,world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group("nccl", rank=rank,world_size=world_size)
+
+def cleanup():
+    dist.destroy_process_group()
 
 # データの準備をする
 # -トークン化されたファイルを開く
@@ -86,9 +96,6 @@ def Collate(batch):
     src_batch = pad_sequence(src_batch, padding_value=ja_token2id['<pad>'], batch_first=True)
     tgt_batch = pad_sequence(tgt_batch, padding_value=en_token2id['<pad>'], batch_first=True)
     return src_batch, tgt_batch
-
-train_dataset=TranslationDataset(ja_ids,en_ids)
-train_loader=DataLoader(train_dataset,batch_size=32,shuffle=True,collate_fn=Collate,num_workers=4)
 
 # 文の順序を保持するための位置エンコーディング
 class PositionalEncoding(nn.Module):
@@ -162,23 +169,26 @@ def generate_square_subsequent_mask(sz):
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
     return mask
 
-def calculate_bleu_score(model, data_loader, ja_id2token, en_id2token, device):
+def calculate_bleu_score(model, data_loader, rank):
     model.eval()
-    total_bleu = 0
+    local_preds = []
+    local_targets = []
+
+    # DDPの各プロセスで推論を行う
     with torch.no_grad():
         for src_batch, tgt_batch in data_loader:
-            src_batch = src_batch.to(device)
-            tgt_batch = tgt_batch.to(device)
+            src_batch = src_batch.to(rank)
+            tgt_batch = tgt_batch.to(rank)
 
             tgt_input = tgt_batch[:, :-1]  # decoder入力
             tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
 
             # 推論
-            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
+            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(rank)
             src_pad_id = ja_token2id['<pad>']
             tgt_pad_id = en_token2id['<pad>']
 
-            output = model(
+            output = model.module(
                 src_batch,
                 tgt_input,
                 tgt_mask=tgt_mask,
@@ -190,97 +200,154 @@ def calculate_bleu_score(model, data_loader, ja_id2token, en_id2token, device):
             # 出力をデコード
             output = torch.argmax(output, dim=-1)  # [batch_size, tgt_len]
             for pred, target in zip(output, tgt_output):
-                pred_tokens = [en_id2token[idx.item()] for idx in pred if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-                target_tokens = [en_id2token[idx.item()] for idx in target if idx.item() not in [en_token2id['<pad>'], en_token2id['<sos>'], en_token2id['<eos>']]]
-                total_bleu += sacrebleu.corpus_bleu(pred_tokens, [target_tokens])
-
-    return total_bleu / len(data_loader)
-
-# 学習ループ
-src_vocab_size = len(ja_token2id)
-tgt_vocab_size = len(en_token2id)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = TransformerNMT(
-    src_vocab_size,
-    tgt_vocab_size,
-    d_model=512,
-    nhead=8,
-    num_layers=6,
-    dim_ff=2048
-).to(device)
-model = nn.DataParallel(model)  # DataParallelでラップ
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
-pad_id = en_token2id['<pad>']
-criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
-
-# Wndbのログイン
-key=open("AllKeys/wandb").readline()
-wandb.login(key=key)
-
-# Wndbの初期化
-wandb.init(project="22lesson96")
-
-# ハイパーパラメータの設定
-wandb.config.epochs=20
-
-for epoch in range(2,wandb.config.epochs):
-    model.train()
-    total_loss = 0
+                # <pad>トークンを除去
+                pred_tokens = [en_id2token[idx.item()] for idx in pred if idx.item() != en_token2id['<pad>']]
+                target_tokens = [en_id2token[idx.item()] for idx in target if idx.item() != en_token2id['<pad>']]
+                # <sos> <eos> を除去
+                pred_tokens = [tok for tok in pred_tokens if tok not in ['<sos>', '<eos>']]
+                target_tokens = [tok for tok in target_tokens if tok not in ['<sos>', '<eos>']]
+                local_preds.append(" ".join(pred_tokens))
+                local_targets.append(" ".join(target_tokens))
+    # 各プロセスの推論結果をリストにまとめる
+    gathered_preds = [None] * dist.get_world_size()
+    gathered_targets = [None] * dist.get_world_size()
+    dist.all_gather_object(gathered_preds, local_preds)
+    dist.all_gather_object(gathered_targets, local_targets)
+    # rank 0 のプロセスのみでBLEUスコアを計算
+    if rank == 0:
+        # リストをフラット化
+        all_preds = [pred for sublist in gathered_preds for pred in sublist]
+        all_targets = [target for sublist in gathered_targets for target in sublist]
+        
+        # sacrebleuは参照訳をリストのリストとして受け取る [[ref1], [ref2], ...]
+        bleu = sacrebleu.corpus_bleu(all_preds, [all_targets])
+        return bleu.
     
-    # tqdmで進捗バーを作成
-    for src_batch, tgt_batch in tqdm(train_loader):
-        src_batch = src_batch.to(device)
-        tgt_batch = tgt_batch.to(device)
-        
-        tgt_input = tgt_batch[:, :-1]  # decoder入力
-        tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
+    return 0.0 # 他のプロセスはダミー値を返す
 
-        tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
+def main_worker(rank, world_size):
+    # 学習ループ
+    print(f"Running DDP on rank {rank}.")
+    setup(rank,world_size)
+    # データセットとサンプラーの準備
+    train_dataset=TranslationDataset(ja_ids, en_ids)
+    train_sampler=DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
+    train_loader=DataLoader(train_dataset, batch_size=32, shuffle=False, collate_fn=Collate, num_workers=0, sampler=train_sampler)
+    # モデルの準備
+    src_vocab_size = len(ja_token2id)
+    tgt_vocab_size = len(en_token2id)
+    model = TransformerNMT(
+        src_vocab_size,
+        tgt_vocab_size,
+        d_model=512,
+        nhead=8,
+        num_layers=6,
+        dim_ff=2048
+    ).to(rank)
+    # DDPでラップ
+    model = DDP(model,device_ids=[rank])
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
+    pad_id = en_token2id['<pad>']
+    criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
+
+    # Wandbの記録(rank=0のみ)
+    if rank==0:
+        try:
+            # Wndbのログイン
+            key=open("AllKeys/wandb").readline()
+            wandb.login(key=key)
+            except Exception as e:
+                print(f"Could not log in to WandB: {e}")
         
-        src_pad_id = ja_token2id['<pad>']
-        tgt_pad_id = en_token2id['<pad>']
+        # 初期化
+        wandb.init(project="22lesson96")
+
+        # ハイパーパラメータの設定
+        wandb.config.epochs=20
+        wandb.config.batch_size=32
+        wandb.config.world_size=world_size
         
-        optimizer.zero_grad()
+    # 学習ループ
+    epochs=20
+    for epoch in range(epochs):
+        model.train()
+        train_sampler.set_epoch(epoch)
+        total_loss = 0
         
-        output = model(
-            src_batch,
-            tgt_input,
-            tgt_mask=tgt_mask,
-            src_padding_mask=(src_batch == src_pad_id),
-            tgt_padding_mask=(tgt_input == tgt_pad_id),
-            memory_key_padding_mask=(src_batch == src_pad_id)
+        # rank=0のみでtqdm進捗バーを作成
+        pbar = tqdm(train_loader) if rank == 0 else train_loader
+        for src_batch, tgt_batch in pbar:
+            src_batch = src_batch.to(rank)
+            tgt_batch = tgt_batch.to(rank)
+            
+            tgt_input = tgt_batch[:, :-1]  # decoder入力
+            tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
+
+            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(rank)
+            
+            src_pad_id = ja_token2id['<pad>']
+            tgt_pad_id = en_token2id['<pad>']
+            
+            optimizer.zero_grad()
+            
+            output = model(
+                src_batch,
+                tgt_input,
+                tgt_mask=tgt_mask,
+                src_padding_mask=(src_batch == src_pad_id),
+                tgt_padding_mask=(tgt_input == tgt_pad_id),
+                memory_key_padding_mask=(src_batch == src_pad_id)
+            )
+            
+            # 出力 shape [batch_size, tgt_len, vocab_size] → [batch_size * tgt_len, vocab_size]
+            output = output.reshape(-1, output.size(-1))
+            tgt_output = tgt_output.reshape(-1)
+            
+            loss = criterion(output, tgt_output)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            
+            total_loss += loss.item()
+
+        # 全プロセスでロスを同期・平均化
+        avg_loss = total_loss / len(train_loader)
+        loss_tensor = torch.tensor([avg_loss]).to(rank)
+        dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+        avg_loss_all = loss_tensor.item()
+
+        # BLUEスコアの計算
+        bleu_score = calculate_bleu_score(
+            model,
+            train_loader,
+            rank
         )
-        
-        # 出力 shape [batch_size, tgt_len, vocab_size] → [batch_size * tgt_len, vocab_size]
-        output = output.reshape(-1, output.size(-1))
-        tgt_output = tgt_output.reshape(-1)
-        
-        loss = criterion(output, tgt_output)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-        
-        total_loss += loss.item()
+        # rank==0のみでWandbへの記録
+        if rank==0:
+            wandb.log(
+                {
+                    "bleu_score":bleu_score,
+                    "loss":total_loss/len(train_loader),
+                }
+            )
+            print(f"epoch {epoch+1} loss: {total_loss / len(train_loader):.4f}")
+        torch.cuda.empty_cache()
+    if rank==0:
+        wandb.finish()
+    cleanup()
 
-    # BLUEスコアの計算
-    bleu_score = calculate_bleu_score(
-        model,
-        train_loader,
-        ja_id2token,
-        en_id2token,
-        device
-    )
-    # Wandbへの記録
-    wandb.log(
-        {
-            "bleu_score":bleu_score,
-            "loss":total_loss/len(train_loader),
-        }
-    )
-    print(f"epoch {epoch+1} loss: {total_loss / len(train_loader):.4f}")
-    torch.cuda.empty_cache()
-wandb.finish()
-
+if __name__ == '__main__':
+    world_size = torch.cude.device_count()
+    if world_size > 0:
+        print(f"Found {world_size} GPUs. Spawning DDP processes.")
+        # spawn を使って DDP プロセスを起動
+        mp.spawn(main_worker,
+                 args=(world_size,),
+                 nprocs=world_size,
+                 join=True)
+    else:
+        print("No GPUs found. DDP requires GPUs.")
 """
 # モデルと語彙の保存(次で使えるように)
 torch.save(model.state_dict(), "transformer_nmt.pt")
