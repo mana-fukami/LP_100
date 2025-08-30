@@ -103,9 +103,9 @@ def generate_square_subsequent_mask(sz, device):
     return mask
 
 # =============================================================================
-# 4. 学習ループ
+# 4. Worker関数
 # =============================================================================
-def train_loop(rank, world_size, ja_ids, en_ids, sp_ja, sp_en, num_epochs=10, batch_size=32):
+def worker(rank, world_size, ja_ids, en_ids, sp_ja, sp_en):
     print(f"Running DDP training on rank {rank}.")
     setup(rank, world_size)
 
@@ -114,10 +114,15 @@ def train_loop(rank, world_size, ja_ids, en_ids, sp_ja, sp_en, num_epochs=10, ba
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
     
     # collate_fnにspmプロセッサを渡すためにlambdaを使用
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
-                              collate_fn=lambda b: collate_fn(b, sp_ja, sp_en), num_workers=2, pin_memory=True)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        sampler=train_sampler,
+        collate_fn=lambda b: collate_fn(b, sp_ja, sp_en),
+        num_workers=2, pin_memory=True
+    )
 
-    # 修正点: 語彙サイズはget_piece_size()で取得する
+    # モデルとDDPの準備
     src_vocab_size = sp_ja.get_piece_size()
     tgt_vocab_size = sp_en.get_piece_size()
 
@@ -127,6 +132,7 @@ def train_loop(rank, world_size, ja_ids, en_ids, sp_ja, sp_en, num_epochs=10, ba
     optimizer = torch.optim.Adam(ddp_model.parameters(), lr=1e-4, betas=(0.9, 0.98), eps=1e-9)
     criterion = nn.CrossEntropyLoss(ignore_index=sp_en.pad_id())
 
+    num_epochs = 10
     for epoch in range(num_epochs):
         ddp_model.train()
         train_sampler.set_epoch(epoch) # shuffleが正しく機能するために必要
@@ -146,9 +152,12 @@ def train_loop(rank, world_size, ja_ids, en_ids, sp_ja, sp_en, num_epochs=10, ba
             tgt_key_padding_mask = (tgt_input == sp_en.pad_id())
 
             optimizer.zero_grad()
-            output = ddp_model(src_batch, tgt_input, tgt_mask=tgt_mask,
-                               src_key_padding_mask=src_key_padding_mask,
-                               tgt_key_padding_mask=tgt_key_padding_mask)
+            output = ddp_model(
+                src_batch, tgt_input,
+                tgt_mask=tgt_mask,
+                src_key_padding_mask=src_key_padding_mask,
+                tgt_key_padding_mask=tgt_key_padding_mask
+            )
             
             loss = criterion(output.reshape(-1, output.size(-1)), tgt_output.reshape(-1))
             loss.backward()
@@ -324,25 +333,27 @@ def main():
 
     # --- DDPによる学習の実行 ---
     world_size = torch.cuda.device_count()
-    # torchrunがrankを環境変数として渡す
-    rank = int(os.environ.get('LOCAL_RANK', '0'))
+     if world_size > 1:
+        args = (world_size, ja_ids, en_ids, sp_ja, sp_en)
+        mp.spawn(worker,
+                 args=args,
+                 nprocs=world_size,
+                 join=True)
+    else:
+        print("DDP requires multiple GPUs. Running on a single GPU is not supported by this script.")
     
-    # 学習を実行
-    train_loop(rank, world_size, ja_ids, en_ids, sp_ja, sp_en)
+    # --- 評価はメインプロセスのみが実行 ---
+    print("DDP training finished. Starting evaluation on the main process.")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    src_vocab_size = sp_ja.get_piece_size()
+    tgt_vocab_size = sp_en.get_piece_size()
+
+    # DDPでラップされていない単体のモデルをインスタンス化
+    eval_model = TransformerNMT(src_vocab_size, tgt_vocab_size).to(device)
+    eval_model.load_state_dict(torch.load("subword_transformer_nmt_ddp.pt", map_location=device))
     
-    # dist.barrier() # 全てのプロセスが学習を終えるまで待機
-    # --- 評価はrank 0のプロセスのみが実行 ---
-    if rank == 0:
-        device = torch.device(f"cuda:{rank}")
-        src_vocab_size = sp_ja.get_piece_size()
-        tgt_vocab_size = sp_en.get_piece_size()
-        
-        # DDPでラップされていない単体のモデルをインスタンス化
-        eval_model = TransformerNMT(src_vocab_size, tgt_vocab_size).to(device)
-        eval_model.load_state_dict(torch.load("subword_transformer_nmt_ddp.pt", map_location=device))
-        
-        # 評価とプロットを実行
-        evaluate_and_plot(eval_model, device, sp_ja, sp_en)
+    # 評価とプロットを実行
+    evaluate_and_plot(eval_model, device, sp_ja, sp_en)
 
 if __name__ == '__main__':
     main()

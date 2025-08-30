@@ -13,50 +13,6 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.utils.checkpoint import checkpoint
 import sacrebleu
 
-# データの準備
-# -トークン化されたファイルを開く
-en_file=open("./kftt-data-1.0/data/tok/kyoto-train.en","r",encoding="utf-8")
-en_lines=en_file.readlines()
-ja_file=open("./kftt-data-1.0/data/tok/kyoto-train.ja","r",encoding="utf-8")
-ja_lines=ja_file.readlines()
-
-# -トークン列のリストを作る
-en_tokenized=[]
-for line in en_lines:
-    en_tokenized.append(line.strip().split())
-ja_tokenized=[]
-for line in ja_lines:
-    ja_tokenized.append(line.strip().split())
-
-# -語彙の作成
-en_counter=Counter()
-ja_counter=Counter()
-for tokens in en_tokenized:
-    en_counter.update(tokens)
-for tokens in ja_tokenized:
-    ja_counter.update(tokens)
-
-# -頻度の高い順に並べる
-max_vocab_size = 25000
-en_vocab_list = ['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in en_counter.most_common(max_vocab_size)]
-ja_vocab_list=['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in ja_counter.most_common(max_vocab_size)]
-
-# -IDの辞書
-en_token2id = {token: idx for idx, token in enumerate(en_vocab_list)}
-ja_token2id = {token: idx for idx, token in enumerate(ja_vocab_list)}
-en_id2token = {idx: token for token, idx in en_token2id.items()}
-ja_id2token = {idx: token for token, idx in ja_token2id.items()}
-
-# -数値列に変換
-en_ids=[]
-ja_ids=[]
-for ja in ja_tokenized:
-    ids = [ja_token2id.get(token, ja_token2id['<unk>']) for token in ja]
-    ja_ids.append( [ja_token2id['<sos>']] + ids + [ja_token2id['<eos>']] )
-for en in en_tokenized:
-    ids = [en_token2id.get(token, en_token2id['<unk>']) for token in en]
-    en_ids.append( [en_token2id['<sos>']] + ids + [en_token2id['<eos>']] )
-
 # -データセット化
 class TranslationDataset(Dataset):
     def __init__(self, src_sequences, tgt_sequences):
@@ -69,7 +25,7 @@ class TranslationDataset(Dataset):
     def __getitem__(self, idx):
         return torch.tensor(self.src_sequences[idx], dtype=torch.long), torch.tensor(self.tgt_sequences[idx], dtype=torch.long)
 
-def Collate(batch):
+def Collate(batch, ja_token2id, en_token2id):
     src_batch, tgt_batch = zip(*batch)
     src_batch = pad_sequence(src_batch, padding_value=ja_token2id['<pad>'], batch_first=True)
     tgt_batch = pad_sequence(tgt_batch, padding_value=en_token2id['<pad>'], batch_first=True)
@@ -122,8 +78,9 @@ def generate_square_subsequent_mask(sz):
     return mask
 
 # 勾配蓄積+混合精度学習を適用
-def train_loop(rank, model, train_loader, optimizer, criterion, epochs):
+def train_loop(rank, model, train_loader, optimizer, criterion, epochs, ja_token2id, en_token2id):
     """1試行あたりの学習ループ (勾配蓄積を実装)"""
+    if rank == 0: print("Train loop started!")
     model.train()
     accumulation_steps = 4  # 4ステップで1回パラメータを更新 (実質的なバッチサイズが4倍に)
     scaler = GradScaler()
@@ -132,8 +89,7 @@ def train_loop(rank, model, train_loader, optimizer, criterion, epochs):
         # DistributedSamplerを使う場合、各エポックでset_epochを呼び出す必要がある
         train_loader.sampler.set_epoch(epoch)
         # tqdmをマスタープロセス(rank 0)でのみ表示する
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", disable=(rank != 0))
-        
+        pbar = tqdm(train_loader) if rank == 0 else train_loader
         for i, (src_batch, tgt_batch) in enumerate(pbar):
             src_batch = src_batch.to(rank)
             tgt_batch = tgt_batch.to(rank)
@@ -176,7 +132,7 @@ def train_loop(rank, model, train_loader, optimizer, criterion, epochs):
         optimizer.zero_grad()
 
 # BLEUスコア計算 (変更なし)
-def calculate_bleu_score(model, data_loader, device):
+def calculate_bleu_score(model, data_loader, device, ja_token2id, en_token2id, en_id2token):
     # DDPでラップされている場合、元のモデルにアクセスするために .module を使用
     model_to_eval = model.module if isinstance(model, DDP) else model
     model_to_eval.eval()
@@ -203,7 +159,8 @@ def calculate_bleu_score(model, data_loader, device):
                 out = model_to_eval.transformer.decoder(
                     model_to_eval.positional_encoding(model_to_eval.tgt_embedding(ys)).transpose(0,1), 
                     memory, 
-                    tgt_mask=tgt_mask
+                    tgt_mask=tgt_mask,
+                    memory_key_padding_mask=src_padding_mask
                 )
                 out = out.transpose(0,1)
                 prob = model_to_eval.output_layer(out[:, -1])
@@ -229,16 +186,61 @@ def calculate_bleu_score(model, data_loader, device):
     return bleu.score
 
 def main():
+    # データの準備
+    # -トークン化されたファイルを開く
+    en_file=open("./kftt-data-1.0/data/tok/kyoto-train.en","r",encoding="utf-8")
+    en_lines=en_file.readlines()
+    ja_file=open("./kftt-data-1.0/data/tok/kyoto-train.ja","r",encoding="utf-8")
+    ja_lines=ja_file.readlines()
+
+    # -トークン列のリストを作る
+    en_tokenized=[]
+    for line in en_lines:
+        en_tokenized.append(line.strip().split())
+    ja_tokenized=[]
+    for line in ja_lines:
+        ja_tokenized.append(line.strip().split())
+
+    # -語彙の作成
+    en_counter=Counter()
+    ja_counter=Counter()
+    for tokens in en_tokenized:
+        en_counter.update(tokens)
+    for tokens in ja_tokenized:
+        ja_counter.update(tokens)
+
+    # -頻度の高い順に並べる
+    max_vocab_size = 25000
+    en_vocab_list = ['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in en_counter.most_common(max_vocab_size)]
+    ja_vocab_list=['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in ja_counter.most_common(max_vocab_size)]
+
+    # -IDの辞書
+    en_token2id = {token: idx for idx, token in enumerate(en_vocab_list)}
+    ja_token2id = {token: idx for idx, token in enumerate(ja_vocab_list)}
+    en_id2token = {idx: token for token, idx in en_token2id.items()}
+    ja_id2token = {idx: token for token, idx in ja_token2id.items()}
+
+    # -数値列に変換
+    en_ids=[]
+    ja_ids=[]
+    for ja in ja_tokenized:
+        ids = [ja_token2id.get(token, ja_token2id['<unk>']) for token in ja]
+        ja_ids.append( [ja_token2id['<sos>']] + ids + [ja_token2id['<eos>']] )
+    for en in en_tokenized:
+        ids = [en_token2id.get(token, en_token2id['<unk>']) for token in en]
+        en_ids.append( [en_token2id['<sos>']] + ids + [en_token2id['<eos>']] )
+
     # コマンドライン引数の設定
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr', type=float, required=True)
     parser.add_argument('--batch_size', type=int, required=True)
-    parser.add_srgumant('--optimizer', type=str, required=True)
+    parser.add_argument('--optimizer', type=str, required=True)
     args = parser.parse_args()
 
-    # DDpの初期化
+    # DDPの初期化
     dist.init_process_group("nccl")
     rank = dist.get_rank()
+    world_size = dist.get_world_size()
     device = torch.device(f"cuda:{rank}")
 
     # モデルやパラメータの設定
@@ -251,7 +253,8 @@ def main():
     # DataLoaderの作成
     # DDPの場合、shuffle=Falseにする (Samplerがシャッフルするため)
     train_loader = DataLoader(
-        train_dataset, batch_size=args.batch_size, collate_fn=Collate,
+        train_dataset, batch_size=args.batch_size,
+        collate_fn=lambda batch: Collate(batch, ja_token2id, en_token2id),
         sampler=train_sampler, pin_memory=True, num_workers=0
     )
 
@@ -271,25 +274,27 @@ def main():
 
     # Optimizerの選択
     if args.optimizer == 'Adam':
-        optimizer = torch.optim.Adam(model.parameters(), lr=params['learning_rate'])
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     elif args.optimizer == 'AdamW':
-        optimizer = torch.optim.AdamW(model.parameters(), lr=params['learning_rate'])
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     pad_id = en_token2id['<pad>']
     criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
     
     # 学習実行
     epochs = 5  # 1回の試行でのエポック数 (適宜調整)
-    train_loop(rank, model, train_loader, optimizer, criterion, epochs)
+    train_loop(rank, model, train_loader, optimizer, criterion, epochs, ja_token2id, en_token2id)
 
     # マスタープロセス(rank 0)のみで評価と結果報告を行う
     if rank == 0:
         # 評価用のデータローダ (Samplerなし)
         # サンプル数を減らして評価を高速化することも可能
         val_dataset = TranslationDataset(ja_ids[:500], en_ids[:500]) # 500文で評価
-        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=Collate)
+        val_loader = DataLoader(
+            val_dataset, batch_size=args.batch_size,
+            collate_fn=lambda batch: Collate(batch, ja_token2id, en_token2id))
         
-        bleu_score = calculate_bleu_score(model, val_loader, rank)
+        bleu_score = calculate_bleu_score(model, val_loader, rank, ja_token2id, en_token2id, en_id2token)
         print(f"Trial finished. BLEU Score: {bleu_score}")
         # 結果を出力する（メインプロセスに引き渡す）
         print(f"{bleu_score}")
