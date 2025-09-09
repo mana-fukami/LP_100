@@ -4,7 +4,7 @@ import torch.nn as nn
 import pickle
 import MeCab
 
-# GPUが利用可能か確認し、デバイスを設定します
+# GPUが利用可能か確認し、デバイスを設定
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
@@ -64,7 +64,7 @@ def load_model_and_dict():
         # MeCabの初期化に失敗した場合は、プログラムを終了させます
         raise
 
-    # 辞書ファイルを読み込みます
+    # 辞書ファイルを読み込む
     with open("model/ja_token2id.pkl", "rb") as f:
         ja_token2id = pickle.load(f)
     with open("model/en_token2id.pkl", "rb") as f:
@@ -85,11 +85,11 @@ def load_model_and_dict():
         dim_ff=2048
     ).to(device)
     
-    # 学習済みモデルの重みを読み込みます
+    # 学習済みモデルの重みを読み込む
     model.load_state_dict(torch.load("model/model.pt", map_location=device))
-    model.eval() # モデルを推論モードに設定します
+    model.eval() # モデルを推論モードに設定
 
-    # 初期化したオブジェクトを全て返します
+    # 初期化したオブジェクトを全て返す
     return model, ja_token2id, en_token2id, en_id2token, tagger
 
 # 翻訳処理を行う関数

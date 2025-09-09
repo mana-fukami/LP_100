@@ -6,6 +6,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 import torch.distributed as dist
+import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
@@ -16,6 +17,8 @@ import sentencepiece as spm
 import torch.nn.functional as F
 import heapq
 import os
+from functools import partial
+from torch.cuda.amp import GradScaler, autocast
 
 # =============================================================================
 # 1. DDP (分散学習) の設定
@@ -113,12 +116,13 @@ def worker(rank, world_size, ja_ids, en_ids, sp_ja, sp_en):
     train_dataset = TranslationDataset(ja_ids, en_ids)
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
     
-    # collate_fnにspmプロセッサを渡すためにlambdaを使用
+    # collate_fnにspmプロセッサを渡す
+    partial_collate_fn = partial(collate_fn, sp_ja=sp_ja, sp_en=sp_en)
     train_loader = DataLoader(
         train_dataset,
-        batch_size=batch_size,
+        batch_size=8,
         sampler=train_sampler,
-        collate_fn=lambda b: collate_fn(b, sp_ja, sp_en),
+        collate_fn=partial_collate_fn,
         num_workers=2, pin_memory=True
     )
 
@@ -133,14 +137,17 @@ def worker(rank, world_size, ja_ids, en_ids, sp_ja, sp_en):
     criterion = nn.CrossEntropyLoss(ignore_index=sp_en.pad_id())
 
     num_epochs = 10
+    accumulation_steps = 4
+    scaler = GradScaler()
+
     for epoch in range(num_epochs):
-        ddp_model.train()
+        model.train()
         train_sampler.set_epoch(epoch) # shuffleが正しく機能するために必要
         total_loss = 0
-        
+
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", disable=(rank != 0))
-        for src_batch, tgt_batch in pbar:
-            # 修正点: テンソルはrankに送る
+        for i, (src_batch, tgt_batch) in enumerate(pbar):
+
             src_batch = src_batch.to(rank)
             tgt_batch = tgt_batch.to(rank)
 
@@ -151,21 +158,31 @@ def worker(rank, world_size, ja_ids, en_ids, sp_ja, sp_en):
             src_key_padding_mask = (src_batch == sp_ja.pad_id())
             tgt_key_padding_mask = (tgt_input == sp_en.pad_id())
 
-            optimizer.zero_grad()
-            output = ddp_model(
-                src_batch, tgt_input,
-                tgt_mask=tgt_mask,
-                src_key_padding_mask=src_key_padding_mask,
-                tgt_key_padding_mask=tgt_key_padding_mask
-            )
-            
-            loss = criterion(output.reshape(-1, output.size(-1)), tgt_output.reshape(-1))
-            loss.backward()
-            optimizer.step()
+            with autocast():
+                output = ddp_model(
+                    src_batch, tgt_input,
+                    tgt_mask=tgt_mask,
+                    src_key_padding_mask=src_key_padding_mask,
+                    tgt_key_padding_mask=tgt_key_padding_mask
+                )
 
+                output = output.reshape(-1, output.size(-1))
+                loss = criterion(output, tgt_output.reshape(-1))
+                loss = loss / accumulation_steps
+            scaler.scale(loss).backward()
+
+            if (i + 1) % accumulation_steps == 0:
+                scaler.step(optimizer)
+                scaler.update()
+            
             if rank == 0:
-                total_loss += loss.item()
-                pbar.set_postfix(loss=loss.item())
+                total_loss += loss.item() * accumulation_steps 
+                pbar.set_postfix(loss=loss.item() * accumulation_steps)
+        
+        # エポックの最後に更新されなかった勾配を更新
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad()
 
         if rank == 0:
             avg_loss = total_loss / len(train_loader)
@@ -333,7 +350,7 @@ def main():
 
     # --- DDPによる学習の実行 ---
     world_size = torch.cuda.device_count()
-     if world_size > 1:
+    if world_size > 1:
         args = (world_size, ja_ids, en_ids, sp_ja, sp_en)
         mp.spawn(worker,
                  args=args,

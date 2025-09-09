@@ -89,9 +89,9 @@ def train_loop(rank, model, train_loader, optimizer, criterion, epochs, ja_token
         if rank==0: print("Epoch: ",epoch)
         # DistributedSamplerを使う場合、各エポックでset_epochを呼び出す必要がある
         train_loader.sampler.set_epoch(epoch)
-        # tqdmをマスタープロセス(rank 0)でのみ表示する
-        pbar = tqdm(train_loader) if rank == 0 else train_loader
-        for i, (src_batch, tgt_batch) in enumerate(pbar):
+        length=len(train_loader)
+        for i, (src_batch, tgt_batch) in enumerate(train_loader):
+            if rank==0 and i%100==0: print(f"{i}/{length}")
             src_batch = src_batch.to(rank)
             tgt_batch = tgt_batch.to(rank)
             
@@ -123,9 +123,6 @@ def train_loop(rank, model, train_loader, optimizer, criterion, epochs, ja_token
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-            
-            if rank == 0:
-                pbar.set_postfix(loss=loss.item() * accumulation_steps)
         
         # エポックの最後に更新されなかった勾配を更新
         scaler.step(optimizer)
@@ -147,9 +144,10 @@ def calculate_bleu_score(model, data_loader, device, ja_token2id, en_token2id, e
             
             # 貪欲法(Greedy Search)によるデコード
             # <sos>トークンから開始
+            src_key_padding_mask = (src_batch == ja_token2id['<pad>'])
             memory = model_to_eval.transformer.encoder(
                 model_to_eval.positional_encoding(model_to_eval.src_embedding(src_batch)).transpose(0,1),
-                src_key_padding_mask=(src_batch == ja_token2id['<pad>'])
+                src_key_padding_mask=src_key_padding_mask
             )
 
             batch_size = src_batch.size(0)
@@ -161,7 +159,7 @@ def calculate_bleu_score(model, data_loader, device, ja_token2id, en_token2id, e
                     model_to_eval.positional_encoding(model_to_eval.tgt_embedding(ys)).transpose(0,1), 
                     memory, 
                     tgt_mask=tgt_mask,
-                    memory_key_padding_mask=src_padding_mask
+                    memory_key_padding_mask=src_key_padding_mask
                 )
                 out = out.transpose(0,1)
                 prob = model_to_eval.output_layer(out[:, -1])
@@ -283,7 +281,7 @@ def main():
     criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
     
     # 学習実行
-    epochs = 5  # 1回の試行でのエポック数 (適宜調整)
+    epochs = 3  # 1回の試行でのエポック数 (適宜調整)
     train_loop(rank, model, train_loader, optimizer, criterion, epochs, ja_token2id, en_token2id)
 
     # マスタープロセス(rank 0)のみで評価と結果報告を行う

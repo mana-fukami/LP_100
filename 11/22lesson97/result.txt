@@ -1,0 +1,8 @@
+--- Optimization Finished ---
+Number of finished trials:  5
+Best trial:
+  Value (BLEU Score): 42.5187
+  Params: 
+    batch_size: 4
+    learning_rate: 3.472233334744305e-05
+    optimizer: Adam

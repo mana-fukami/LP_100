@@ -12,6 +12,7 @@ import math
 import os
 import MeCab
 import sacrebleu
+import pickle
 
 # DDPのライブラリ
 import torch.distributed as dist
@@ -40,7 +41,7 @@ class TranslationDataset(Dataset):
     def __getitem__(self, idx):
         return torch.tensor(self.src_sequences[idx], dtype=torch.long),torch.tensor(self.tgt_sequences[idx], dtype=torch.long)
 
-def Collate(batch):
+def Collate(batch, ja_token2id, en_token2id):
     src_batch, tgt_batch = zip(*batch)  # バッチの中のサンプルを分ける
     src_batch = pad_sequence(src_batch, padding_value=ja_token2id['<pad>'], batch_first=True)
     tgt_batch = pad_sequence(tgt_batch, padding_value=en_token2id['<pad>'], batch_first=True)
@@ -118,6 +119,30 @@ def generate_square_subsequent_mask(sz):
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
     return mask
 
+# 翻訳関数
+def translate(device, tokens, ja_token2id, en_token2id, en_id2token, max_len=50):
+    ids = [ja_token2id.get(tok, ja_token2id["<unk>"]) for tok in tokens]
+    src = torch.tensor([[ja_token2id["<sos>"]] + ids + [ja_token2id["<eos>"]]], device=device)
+    src_padding_mask = (src == ja_token2id["<pad>"])
+    generated = [en_token2id["<sos>"]]
+    for _ in range(max_len):
+        tgt_input = torch.tensor([generated], device=device)
+        tgt_mask = torch.triu(torch.ones(tgt_input.size(1), tgt_input.size(1), device=device) == 1).transpose(0, 1)
+        tgt_mask = tgt_mask.float().masked_fill(tgt_mask == 0, float('-inf')).masked_fill(tgt_mask == 1, 0.0)
+        with torch.no_grad():
+            out = model(
+                src,
+                tgt_input,
+                tgt_mask=tgt_mask,
+                src_padding_mask=src_padding_mask,
+                tgt_padding_mask=(tgt_input==en_token2id["<pad>"]),
+                memory_key_padding_mask=src_padding_mask
+            )
+        next_token = out[0, -1].argmax(-1).item()
+        generated.append(next_token)
+        if next_token == en_token2id["<eos>"]:
+            break
+    return [en_id2token[idx] for idx in generated[1:-1]]
 
 def main_worker(rank,world_size, ja_ids, en_ids, ja_token2id, en_token2id, en_id2token):
     print(f"Running DDP on rank {rank}.")
@@ -125,7 +150,11 @@ def main_worker(rank,world_size, ja_ids, en_ids, ja_token2id, en_token2id, en_id
     # データローダーの準備
     train_dataset = TranslationDataset(ja_ids, en_ids)
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False, collate_fn=Collate, num_workers=4, sampler=train_sampler)
+    train_loader = DataLoader(
+        train_dataset, batch_size=32,
+        collate_fn=lambda batch: Collate(batch, ja_token2id, en_token2id),
+        sampler=train_sampler, pin_memory=True, num_workers=0
+    )
     # モデルの準備とファインチューニング
     src_vocab_size = len(ja_token2id)
     tgt_vocab_size = len(en_token2id)
@@ -138,8 +167,8 @@ def main_worker(rank,world_size, ja_ids, en_ids, ja_token2id, en_token2id, en_id
         dim_ff=2048
     ).to(rank)
     # DDPで学習済みモデルを読み込む
-    model.load_state_dict(torch.load("transformer_nmt.pt", map_location=map_location))
-    model=DDP(model, device=[rank])
+    model.load_state_dict(torch.load("transformer_nmt.pt"))
+    model=DDP(model, device_ids=[rank])
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
     pad_id = en_token2id['<pad>']
     criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
@@ -159,7 +188,7 @@ def main_worker(rank,world_size, ja_ids, en_ids, ja_token2id, en_token2id, en_id
             tgt_input = tgt_batch[:, :-1]  # decoder入力
             tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
 
-            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(device)
+            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(rank)
             
             src_pad_id = ja_token2id['<pad>']
             tgt_pad_id = en_token2id['<pad>']
@@ -188,49 +217,31 @@ def main_worker(rank,world_size, ja_ids, en_ids, ja_token2id, en_token2id, en_id
         
         if rank==0:
             print(f"epoch {epoch+1} loss: {total_loss / len(train_loader):.4f}")
-    
+
     # モデルの保存と評価
     if rank==0:
         # モデルと語彙の保存(次で使えるように)
         torch.save(model.state_dict(), "add_train_transformer_nmt.pt")
         eval_model=model.module # 評価はDDPのラップなしで
-        eval_model.eval
+        eval_model.eval()
 
         # テストデータ読み込み
         with open("./kftt-data-1.0/data/tok/kyoto-test.ja") as f:
             test_ja = [line.split(" ") for line in f]
         with open("./kftt-data-1.0/data/tok/kyoto-test.en") as f:
             test_en = [line for line in f]
-
-        # 翻訳関数
-        def translate(tokens, max_len=50):
-            ids = [ja_token2id.get(tok, ja_token2id["<unk>"]) for tok in tokens]
-            src = torch.tensor([[ja_token2id["<sos>"]] + ids + [ja_token2id["<eos>"]]], device=device)
-            src_padding_mask = (src == ja_token2id["<pad>"])
-            generated = [en_token2id["<sos>"]]
-            for _ in range(max_len):
-                tgt_input = torch.tensor([generated], device=device)
-                tgt_mask = torch.triu(torch.ones(tgt_input.size(1), tgt_input.size(1), device=device) == 1).transpose(0, 1)
-                tgt_mask = tgt_mask.float().masked_fill(tgt_mask == 0, float('-inf')).masked_fill(tgt_mask == 1, 0.0)
-                with torch.no_grad():
-                    out = model(
-                        src,
-                        tgt_input,
-                        tgt_mask=tgt_mask,
-                        src_padding_mask=src_padding_mask,
-                        tgt_padding_mask=(tgt_input==en_token2id["<pad>"]),
-                        memory_key_padding_mask=src_padding_mask
-                    )
-                next_token = out[0, -1].argmax(-1).item()
-                generated.append(next_token)
-                if next_token == en_token2id["<eos>"]:
-                    break
-            return [en_id2token[idx] for idx in generated[1:-1]]
+        # 評価用の辞書ファイルを読み込む
+        with open("ja_token2id.pkl", "rb") as f:
+            ja_token2id = pickle.load(f)
+        with open("en_token2id.pkl", "rb") as f:
+            en_token2id = pickle.load(f)
+        with open("en_id2token.pkl", "rb") as f:
+            en_id2token = pickle.load(f)
 
         # BLEU計算
         hypotheses = []
         for tokens in tqdm(test_ja):
-            pred_tokens = translate(tokens)
+            pred_tokens = translate(rank, tokens, ja_token2id, en_token2id, en_id2token)
             hypotheses.append(" ".join(pred_tokens))
 
         # sacreBLEU
@@ -274,7 +285,7 @@ if __name__=='__main__':
         ja_counter.update(tokens)
     
     # -頻度の高い順に並べる
-    max_vocab_size = 25000
+    max_vocab_size = 50000
     en_vocab_list = ['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in en_counter.most_common(max_vocab_size)]
     ja_vocab_list = ['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in ja_counter.most_common(max_vocab_size)]
 
