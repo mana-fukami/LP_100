@@ -86,7 +86,7 @@ class TransformerNMT(nn.Module):
         # d_model次元の特徴ベクトルをターゲット語彙数に変換する
         self.output_layer = nn.Linear(d_model, tgt_vocab_size)
     
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None, src_padding_mask=None, tgt_padding_mask=None, memory_key_padding_mask=None):
+    def forward(self, src, tgt, src_mask=None, tgt_mask=None, src_key_padding_mask=None, tgt_key_padding_mask=None, memory_key_padding_mask=None):
         # Embedding + positional
         # ID列をベクトルにし、位置エンコーディングを加える
         src_emb = self.positional_encoding(self.src_embedding(src))
@@ -102,8 +102,8 @@ class TransformerNMT(nn.Module):
             tgt_emb,
             src_mask=src_mask,
             tgt_mask=tgt_mask,
-            src_key_padding_mask=src_padding_mask,
-            tgt_key_padding_mask=tgt_padding_mask,
+            src_key_padding_mask=src_key_padding_mask,
+            tgt_key_padding_mask=tgt_key_padding_mask,
             memory_key_padding_mask=memory_key_padding_mask
         )
         
@@ -120,10 +120,10 @@ def generate_square_subsequent_mask(sz):
     return mask
 
 # 翻訳関数
-def translate(device, tokens, ja_token2id, en_token2id, en_id2token, max_len=50):
+def translate(model, device, tokens, ja_token2id, en_token2id, en_id2token, max_len=50):
     ids = [ja_token2id.get(tok, ja_token2id["<unk>"]) for tok in tokens]
     src = torch.tensor([[ja_token2id["<sos>"]] + ids + [ja_token2id["<eos>"]]], device=device)
-    src_padding_mask = (src == ja_token2id["<pad>"])
+    src_key_padding_mask = (src == ja_token2id["<pad>"])
     generated = [en_token2id["<sos>"]]
     for _ in range(max_len):
         tgt_input = torch.tensor([generated], device=device)
@@ -134,9 +134,9 @@ def translate(device, tokens, ja_token2id, en_token2id, en_id2token, max_len=50)
                 src,
                 tgt_input,
                 tgt_mask=tgt_mask,
-                src_padding_mask=src_padding_mask,
-                tgt_padding_mask=(tgt_input==en_token2id["<pad>"]),
-                memory_key_padding_mask=src_padding_mask
+                src_key_padding_mask=src_key_padding_mask,
+                tgt_key_padding_mask=(tgt_input==en_token2id["<pad>"]),
+                memory_key_padding_mask=src_key_padding_mask
             )
         next_token = out[0, -1].argmax(-1).item()
         generated.append(next_token)
@@ -199,8 +199,8 @@ def main_worker(rank,world_size, ja_ids, en_ids, ja_token2id, en_token2id, en_id
                 src_batch,
                 tgt_input,
                 tgt_mask=tgt_mask,
-                src_padding_mask=(src_batch == src_pad_id),
-                tgt_padding_mask=(tgt_input == tgt_pad_id),
+                src_key_padding_mask=(src_batch == src_pad_id),
+                tgt_key_padding_mask=(tgt_input == tgt_pad_id),
                 memory_key_padding_mask=(src_batch == src_pad_id)
             )
             
@@ -241,7 +241,7 @@ def main_worker(rank,world_size, ja_ids, en_ids, ja_token2id, en_token2id, en_id
         # BLEU計算
         hypotheses = []
         for tokens in tqdm(test_ja):
-            pred_tokens = translate(rank, tokens, ja_token2id, en_token2id, en_id2token)
+            pred_tokens = translate(model, rank, tokens, ja_token2id, en_token2id, en_id2token)
             hypotheses.append(" ".join(pred_tokens))
 
         # sacreBLEU
@@ -261,7 +261,7 @@ if __name__=='__main__':
         ja_lines.append(en_ja[1])
 
     # -トークン列のリストを作る
-    tagger=MeCab.Tagger(r"C:\Users\mana\AppData\Local\Programs\Python\Python313\Lib\site-packages\unidic\dicdir")
+    tagger=MeCab.Tagger(r"/data/student/f2210543/.cache/pip/wheels/ce/4d/f1/170bb74b559ca338113c0315c9805e16dfd0a12411ec6b1122")
     ja_tokenized=[]
     for line in ja_lines:
         node=tagger.parseToNode(line.strip())
@@ -273,6 +273,11 @@ if __name__=='__main__':
         ja_tokenized.append(tokens)
     en_tokenized=[]
     for line in en_lines:
+        line=line.replace("."," .").replace(","," ,")
+        line=line.replace("?"," ?").replace("!"," !")
+        line=line.replace("\""," \" ").replace("\'"," \' ")
+        line=line.replace(":"," : ").replace(";"," ; ")
+        line=line.replace("("," ( ").replace(")"," ) ")
         tokens=line.strip().split(" ")
         en_tokenized.append(tokens)
     

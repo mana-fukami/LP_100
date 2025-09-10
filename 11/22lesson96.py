@@ -16,6 +16,7 @@ from tqdm import tqdm
 import math
 import os
 import sacrebleu
+import pickle # モデル保存用にインポート
 
 # DDPのライブラリ
 import torch.distributed as dist
@@ -32,330 +33,217 @@ def setup(rank,world_size):
 def cleanup():
     dist.destroy_process_group()
 
-# データの準備をする
-# -トークン化されたファイルを開く
-en_file=open("./kftt-data-1.0/data/tok/kyoto-train.en","r",encoding="utf-8")
-en_lines=en_file.readlines()
-ja_file=open("./kftt-data-1.0/data/tok/kyoto-train.ja","r",encoding="utf-8")
-ja_lines=ja_file.readlines()
+# --- データ準備 ---
+def load_data(en_path, ja_path):
+    with open(en_path,"r",encoding="utf-8") as f:
+        en_lines=f.readlines()
+    with open(ja_path,"r",encoding="utf-8") as f:
+        ja_lines=f.readlines()
+    en_tokenized = [line.strip().split() for line in en_lines]
+    ja_tokenized = [line.strip().split() for line in ja_lines]
+    return en_tokenized, ja_tokenized
 
-# -トークン列のリストを作る
-en_tokenized=[]
-for line in en_lines:
-    en_tokenized.append(line.strip().split())
-ja_tokenized=[]
-for line in ja_lines:
-    ja_tokenized.append(line.strip().split())
+train_en_tokenized, train_ja_tokenized = load_data("./kftt-data-1.0/data/tok/kyoto-train.en", "./kftt-data-1.0/data/tok/kyoto-train.ja")
+dev_en_tokenized, dev_ja_tokenized = load_data("./kftt-data-1.0/data/tok/kyoto-dev.en", "./kftt-data-1.0/data/tok/kyoto-dev.ja")
 
-# -語彙の作成
-en_counter=Counter()
-ja_counter=Counter()
-for tokens in en_tokenized:
-    en_counter.update(tokens)
-for tokens in ja_tokenized:
-    ja_counter.update(tokens)
+en_counter = Counter(token for tokens in train_en_tokenized for token in tokens)
+ja_counter = Counter(token for tokens in train_ja_tokenized for token in tokens)
 
-# -頻度の高い順に並べる
 max_vocab_size = 50000
 en_vocab_list = ['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in en_counter.most_common(max_vocab_size)]
 ja_vocab_list=['<pad>', '<sos>', '<eos>', '<unk>'] + [token for token, freq in ja_counter.most_common(max_vocab_size)]
-#print(f"vocab_size: {len(en_vocab_list)}")
 
-# -IDの辞書
 en_token2id = {token: idx for idx, token in enumerate(en_vocab_list)}
 ja_token2id = {token: idx for idx, token in enumerate(ja_vocab_list)}
-
-# -逆引き
 en_id2token = {idx: token for token, idx in en_token2id.items()}
 ja_id2token = {idx: token for token, idx in ja_token2id.items()}
 
-# -数値列に変換
-en_ids=[]
-ja_ids=[]
-for ja in ja_tokenized:
-    ids = [ja_token2id.get(token, ja_token2id['<unk>']) for token in ja]
-    ja_ids.append( [ja_token2id['<sos>']] + ids + [ja_token2id['<eos>']] )
-for en in en_tokenized:
-    ids = [en_token2id.get(token, en_token2id['<unk>']) for token in en]
-    en_ids.append( [en_token2id['<sos>']] + ids + [en_token2id['<eos>']] )
+def tokens_to_ids(tokenized_sentences, token2id):
+    sos_id, eos_id, unk_id = token2id['<sos>'], token2id['<eos>'], token2id['<unk>']
+    return [[sos_id] + [token2id.get(token, unk_id) for token in tokens] + [eos_id] for tokens in tokenized_sentences]
 
-# -データセット化
+train_ja_ids, train_en_ids = tokens_to_ids(train_ja_tokenized, ja_token2id), tokens_to_ids(train_en_tokenized, en_token2id)
+dev_ja_ids, dev_en_ids = tokens_to_ids(dev_ja_tokenized, ja_token2id), tokens_to_ids(dev_en_tokenized, en_token2id)
+
 class TranslationDataset(Dataset):
     def __init__(self, src_sequences, tgt_sequences):
-        self.src_sequences = src_sequences  # ja_ids
-        self.tgt_sequences = tgt_sequences  # en_ids
-
+        self.src_sequences, self.tgt_sequences = src_sequences, tgt_sequences
     def __len__(self):
         return len(self.src_sequences)
-
     def __getitem__(self, idx):
-        return torch.tensor(self.src_sequences[idx], dtype=torch.long),torch.tensor(self.tgt_sequences[idx], dtype=torch.long)
+        return torch.tensor(self.src_sequences[idx], dtype=torch.long), torch.tensor(self.tgt_sequences[idx], dtype=torch.long)
 
 def Collate(batch):
-    src_batch, tgt_batch = zip(*batch)  # バッチの中のサンプルを分ける
-    src_batch = pad_sequence(src_batch, padding_value=ja_token2id['<pad>'], batch_first=True)
-    tgt_batch = pad_sequence(tgt_batch, padding_value=en_token2id['<pad>'], batch_first=True)
-    return src_batch, tgt_batch
+    src_batch, tgt_batch = zip(*batch)
+    src_padded = pad_sequence(src_batch, padding_value=ja_token2id['<pad>'], batch_first=True)
+    tgt_padded = pad_sequence(tgt_batch, padding_value=en_token2id['<pad>'], batch_first=True)
+    return src_padded, tgt_padded
 
-# 文の順序を保持するための位置エンコーディング
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=5000):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
         super().__init__()
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)   # shape (1, max_len, d_model)
+        self.dropout = nn.Dropout(p=dropout)
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(1, max_len, d_model)
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        # x shape: (batch_size, seq_len, d_model)
+        # x: (batch_size, seq_len, d_model)
         x = x + self.pe[:, :x.size(1)]
-        return x
+        return self.dropout(x)
 
 class TransformerNMT(nn.Module):
     def __init__(self, src_vocab_size, tgt_vocab_size, d_model=512, nhead=8, num_layers=6, dim_ff=2048, dropout=0.1):
-        # d_model:埋め込み層の次元数, nhead:マルチヘッドアテンションのヘッド数
-        # num_layers:エンコーダ・デコーダの層の数, dim__ff:feed-forwardの中間層の次元数
         super().__init__()
-        # 日本語と単語のIDをベクトルに変化する
         self.src_embedding = nn.Embedding(src_vocab_size, d_model)
         self.tgt_embedding = nn.Embedding(tgt_vocab_size, d_model)
-        # Transformerは順序情報を持たないので、位置エンコーディングを行う
-        self.positional_encoding = PositionalEncoding(d_model)
-        
+        self.positional_encoding = PositionalEncoding(d_model, dropout=dropout)
         self.transformer = nn.Transformer(
-            d_model=d_model,
-            nhead=nhead,
-            num_encoder_layers=num_layers,
-            num_decoder_layers=num_layers,
-            dim_feedforward=dim_ff,
-            dropout=dropout
+            d_model=d_model, nhead=nhead,
+            num_encoder_layers=num_layers, num_decoder_layers=num_layers,
+            dim_feedforward=dim_ff, dropout=dropout, batch_first=True
         )
-        # d_model次元の特徴ベクトルをターゲット語彙数に変換する
         self.output_layer = nn.Linear(d_model, tgt_vocab_size)
-    
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None, src_padding_mask=None, tgt_padding_mask=None, memory_key_padding_mask=None):
-        # Embedding + positional
-        # ID列をベクトルにし、位置エンコーディングを加える
+
+    def forward(self, src, tgt, tgt_mask=None, src_key_padding_mask=None, tgt_key_padding_mask=None):
         src_emb = self.positional_encoding(self.src_embedding(src))
         tgt_emb = self.positional_encoding(self.tgt_embedding(tgt))
-        
-        # transformer expects [seq_len, batch_size, d_model]
-        # Transformerに合わせてデータを整形する
-        src_emb = src_emb.transpose(0, 1)
-        tgt_emb = tgt_emb.transpose(0, 1)
-        
         output = self.transformer(
-            src_emb,
-            tgt_emb,
-            src_mask=src_mask,
+            src_emb, tgt_emb,
             tgt_mask=tgt_mask,
-            src_key_padding_mask=src_padding_mask,
-            tgt_key_padding_mask=tgt_padding_mask,
-            memory_key_padding_mask=memory_key_padding_mask
+            src_key_padding_mask=src_key_padding_mask,
+            tgt_key_padding_mask=tgt_key_padding_mask
         )
-        
-        # output: [seq_len, batch_size, d_model]
-        # Transformerの出力を元のデータに合わせる
-        output = output.transpose(0, 1)  # back to [batch_size, seq_len, d_model]
-        # 最後に線形層を通して語彙数に変換する
         return self.output_layer(output)
 
-# マスクの生成
-def generate_square_subsequent_mask(sz):
-    mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+def generate_square_subsequent_mask(sz, device):
+    mask = (torch.triu(torch.ones(sz, sz, device=device)) == 1).transpose(0, 1)
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
     return mask
 
-def calculate_bleu_score(model, data_loader, rank):
+def validate(model, data_loader, criterion, rank):
     model.eval()
-    local_preds = []
-    local_targets = []
-
-    # DDPの各プロセスで推論を行う
+    total_loss = 0
+    local_preds, local_targets_for_bleu = [], []
     with torch.no_grad():
         for src_batch, tgt_batch in data_loader:
-            src_batch = src_batch.to(rank)
-            tgt_batch = tgt_batch.to(rank)
-
-            tgt_input = tgt_batch[:, :-1]  # decoder入力
-            tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
-
-            # 推論
-            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(rank)
-            src_pad_id = ja_token2id['<pad>']
-            tgt_pad_id = en_token2id['<pad>']
-
-            output = model.module(
-                src_batch,
-                tgt_input,
-                tgt_mask=tgt_mask,
-                src_padding_mask=(src_batch == src_pad_id),
-                tgt_padding_mask=(tgt_input == tgt_pad_id),
-                memory_key_padding_mask=(src_batch == src_pad_id)
-            )
-
-            # 出力をデコード
-            output = torch.argmax(output, dim=-1)  # [batch_size, tgt_len]
-            for pred, target in zip(output, tgt_output):
-                # <pad>トークンを除去
-                pred_tokens = [en_id2token[idx.item()] for idx in pred if idx.item() != en_token2id['<pad>']]
-                target_tokens = [en_id2token[idx.item()] for idx in target if idx.item() != en_token2id['<pad>']]
-                # <sos> <eos> を除去
-                pred_tokens = [tok for tok in pred_tokens if tok not in ['<sos>', '<eos>']]
-                target_tokens = [tok for tok in target_tokens if tok not in ['<sos>', '<eos>']]
-                local_preds.append(" ".join(pred_tokens))
-                local_targets.append(" ".join(target_tokens))
-    # 各プロセスの推論結果をリストにまとめる
-    gathered_preds = [None] * dist.get_world_size()
-    gathered_targets = [None] * dist.get_world_size()
-    dist.all_gather_object(gathered_preds, local_preds)
-    dist.all_gather_object(gathered_targets, local_targets)
-    # rank 0 のプロセスのみでBLEUスコアを計算
-    if rank == 0:
-        # リストをフラット化
-        all_preds = [pred for sublist in gathered_preds for pred in sublist]
-        all_targets = [target for sublist in gathered_targets for target in sublist]
-        
-        # sacrebleuは参照訳をリストのリストとして受け取る [[ref1], [ref2], ...]
-        bleu = sacrebleu.corpus_bleu(all_preds, [all_targets])
-        return bleu
-    
-    return 0.0 # 他のプロセスはダミー値を返す
-
-def main_worker(rank, world_size):
-    # 学習ループ
-    print(f"Running DDP on rank {rank}.")
-    setup(rank,world_size)
-    # データセットとサンプラーの準備
-    train_dataset=TranslationDataset(ja_ids, en_ids)
-    train_sampler=DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-    train_loader=DataLoader(train_dataset, batch_size=32, shuffle=False, collate_fn=Collate, num_workers=0, sampler=train_sampler)
-    # モデルの準備
-    src_vocab_size = len(ja_token2id)
-    tgt_vocab_size = len(en_token2id)
-    model = TransformerNMT(
-        src_vocab_size,
-        tgt_vocab_size,
-        d_model=512,
-        nhead=8,
-        num_layers=6,
-        dim_ff=2048
-    ).to(rank)
-    # DDPでラップ
-    model = DDP(model,device_ids=[rank])
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, betas=(0.9,0.98), eps=1e-9)
-    pad_id = en_token2id['<pad>']
-    criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
-
-    # Wandbの記録(rank=0のみ)
-    if rank==0:
-        try:
-            # Wndbのログイン
-            key=open("AllKeys/wandb").readline()
-            wandb.login(key=key)
-        except Exception as e:
-            print(f"Could not log in to WandB: {e}")
-        
-        # 初期化
-        wandb.init(project="22lesson96")
-
-        # ハイパーパラメータの設定
-        wandb.config.epochs=20
-        wandb.config.batch_size=32
-        wandb.config.world_size=world_size
-        
-    # 学習ループ
-    epochs=20
-    for epoch in range(epochs):
-        model.train()
-        train_sampler.set_epoch(epoch)
-        total_loss = 0
-        
-        # rank=0のみでtqdm進捗バーを作成
-        pbar = tqdm(train_loader) if rank == 0 else train_loader
-        for src_batch, tgt_batch in pbar:
-            src_batch = src_batch.to(rank)
-            tgt_batch = tgt_batch.to(rank)
+            src_batch, tgt_batch = src_batch.to(rank), tgt_batch.to(rank)
+            tgt_input, tgt_for_loss, tgt_for_bleu = tgt_batch[:, :-1], tgt_batch[:, 1:].reshape(-1), tgt_batch[:, 1:]
             
-            tgt_input = tgt_batch[:, :-1]  # decoder入力
-            tgt_output = tgt_batch[:, 1:]  # decoder出力の正解
+            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1), rank)
+            src_key_padding_mask = (src_batch == ja_token2id['<pad>'])
+            tgt_key_padding_mask = (tgt_input == en_token2id['<pad>'])
 
-            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1)).to(rank)
-            
-            src_pad_id = ja_token2id['<pad>']
-            tgt_pad_id = en_token2id['<pad>']
-            
-            optimizer.zero_grad()
-            
-            output = model(
-                src_batch,
-                tgt_input,
-                tgt_mask=tgt_mask,
-                src_padding_mask=(src_batch == src_pad_id),
-                tgt_padding_mask=(tgt_input == tgt_pad_id),
-                memory_key_padding_mask=(src_batch == src_pad_id)
-            )
-            
-            # 出力 shape [batch_size, tgt_len, vocab_size] → [batch_size * tgt_len, vocab_size]
-            output = output.reshape(-1, output.size(-1))
-            tgt_output = tgt_output.reshape(-1)
-            
-            loss = criterion(output, tgt_output)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            
+            output = model(src_batch, tgt_input, tgt_mask=tgt_mask, src_key_padding_mask=src_key_padding_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+            loss = criterion(output.view(-1, output.size(-1)), tgt_for_loss)
             total_loss += loss.item()
 
-        # 全プロセスでロスを同期・平均化
-        avg_loss = total_loss / len(train_loader)
-        loss_tensor = torch.tensor([avg_loss]).to(rank)
-        dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
-        avg_loss_all = loss_tensor.item()
+            preds = torch.argmax(output, dim=-1)
+            for p, t in zip(preds, tgt_for_bleu):
+                pred_tokens = [en_id2token.get(idx.item(), '<unk>') for idx in p if idx.item() != en_token2id['<pad>']]
+                target_tokens = [en_id2token.get(idx.item(), '<unk>') for idx in t if idx.item() != en_token2id['<pad>']]
+                try: pred_tokens = pred_tokens[:pred_tokens.index('<eos>')]
+                except ValueError: pass
+                local_preds.append(" ".join(pred_tokens))
+                local_targets_for_bleu.append(" ".join(target_tokens))
 
-        # BLUEスコアの計算
-        bleu_score = calculate_bleu_score(
-            model,
-            train_loader,
-            rank
-        )
-        # rank==0のみでWandbへの記録
-        if rank==0:
-            wandb.log(
-                {
-                    "bleu_score":bleu_score,
-                    "loss":total_loss/len(train_loader),
-                }
-            )
-            print(f"epoch {epoch+1} loss: {total_loss / len(train_loader):.4f}")
-        torch.cuda.empty_cache()
-    if rank==0:
+    # 全プロセスの結果を集約
+    gathered_preds, gathered_targets = [None] * dist.get_world_size(), [None] * dist.get_world_size()
+    dist.all_gather_object(gathered_preds, local_preds)
+    dist.all_gather_object(gathered_targets, local_targets_for_bleu)
+    
+    loss_tensor = torch.tensor([total_loss / len(data_loader)]).to(rank)
+    dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+    avg_val_loss = loss_tensor.item()
+    
+    bleu_score = 0.0
+    if rank == 0:
+        all_preds = [p for sublist in gathered_preds for p in sublist]
+        all_targets = [t for sublist in gathered_targets for t in sublist]
+        bleu = sacrebleu.corpus_bleu(all_preds, [all_targets])
+        bleu_score = bleu.score
+
+    # 全プロセスが同じ値を返すようにする
+    # rank 0 で計算したBLEUスコアを全プロセスにブロードキャスト（共有）する
+    bleu_tensor = torch.tensor([bleu_score]).to(rank)
+    dist.broadcast(bleu_tensor, src=0)
+    
+    return avg_val_loss, bleu_tensor.item()
+
+def main_worker(rank, world_size):
+    print(f"Running DDP on rank {rank}.")
+    setup(rank, world_size)
+    
+    train_dataset, dev_dataset = TranslationDataset(train_ja_ids, train_en_ids), TranslationDataset(dev_ja_ids, dev_en_ids)
+    train_sampler, dev_sampler = DistributedSampler(train_dataset, shuffle=True), DistributedSampler(dev_dataset, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=32, collate_fn=Collate, sampler=train_sampler)
+    dev_loader = DataLoader(dev_dataset, batch_size=32, collate_fn=Collate, sampler=dev_sampler)
+
+    model = TransformerNMT(len(ja_token2id), len(en_token2id)).to(rank)
+    model = DDP(model, device_ids=[rank])
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    criterion = nn.CrossEntropyLoss(ignore_index=en_token2id['<pad>'])
+
+    if rank == 0:
+        wandb.login()
+        wandb.init(project="NMT-KFTT-DDP-Fixed", config={"epochs": 20, "batch_size": 32 * world_size})
+
+    for epoch in range(20):
+        model.train()
+        train_sampler.set_epoch(epoch)
+        total_train_loss = 0
+        pbar = tqdm(train_loader, disable=(rank != 0), desc=f"Epoch {epoch+1}")
+        
+        for src_batch, tgt_batch in pbar:
+            src_batch, tgt_batch = src_batch.to(rank), tgt_batch.to(rank)
+            tgt_input, tgt_output = tgt_batch[:, :-1], tgt_batch[:, 1:].reshape(-1)
+            tgt_mask = generate_square_subsequent_mask(tgt_input.size(1), rank)
+            src_key_padding_mask = (src_batch == ja_token2id['<pad>'])
+            tgt_key_padding_mask = (tgt_input == en_token2id['<pad>'])
+
+            optimizer.zero_grad()
+            output = model(src_batch, tgt_input, tgt_mask=tgt_mask, src_key_padding_mask=src_key_padding_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+            loss = criterion(output.view(-1, output.size(-1)), tgt_output)
+            loss.backward()
+            optimizer.step()
+            total_train_loss += loss.item()
+
+        # DDPでの損失集計
+        loss_tensor = torch.tensor([total_train_loss]).to(rank)
+        dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
+        if rank == 0:
+            avg_train_loss = loss_tensor.item() / (len(train_loader) * world_size)
+        
+        # 評価ステップ
+        val_loss, val_bleu = validate(model, dev_loader, criterion, rank)
+
+        if rank == 0:
+            print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f} | Val Loss: {val_loss:.4f} | Val BLEU: {val_bleu:.2f}")
+            wandb.log({"epoch": epoch + 1, "train_loss": avg_train_loss, "val_loss": val_loss, "val_bleu": val_bleu})
+        
+        dist.barrier() # オプション: 全プロセスがエポックの終わりで同期するのを保証
+        
+    if rank == 0:
+        print("Saving model and vocabularies...")
+        torch.save(model.module.state_dict(), "transformer_nmt_wandb.pt")
+        with open("ja_token2id_wandb.pkl", "wb") as f:
+            pickle.dump(ja_token2id, f)
+        with open("en_token2id_wandb.pkl", "wb") as f:
+            pickle.dump(en_token2id, f)
+        with open("en_id2token_wandb.pkl", "wb") as f:
+            pickle.dump(en_id2token, f)
         wandb.finish()
+        
     cleanup()
 
 if __name__ == '__main__':
     world_size = torch.cuda.device_count()
-    if world_size > 0:
+    if world_size > 1: # DDPは複数GPUでの実行を前提
         print(f"Found {world_size} GPUs. Spawning DDP processes.")
-        # spawn を使って DDP プロセスを起動
-        mp.spawn(main_worker,
-                 args=(world_size,),
-                 nprocs=world_size,
-                 join=True)
+        mp.spawn(main_worker, args=(world_size,), nprocs=world_size, join=True)
     else:
-        print("No GPUs found. DDP requires GPUs.")
-"""
-# モデルと語彙の保存(次で使えるように)
-torch.save(model.state_dict(), "transformer_nmt.pt")
-import pickle
-with open("ja_token2id.pkl", "wb") as f:
-    pickle.dump(ja_token2id, f)
-with open("en_token2id.pkl", "wb") as f:
-    pickle.dump(en_token2id, f)
-with open("en_id2token.pkl", "wb") as f:
-    pickle.dump(en_id2token, f)
-"""
+        print("DDP requires at least 2 GPUs. This script will not run on a single GPU.")
